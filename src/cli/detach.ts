@@ -1,4 +1,4 @@
-import type { EngineMode } from './engine.js';
+import type { EngineMode } from './runOptions.js';
 import type { ModelName } from '../oracle.js';
 import { isProModel } from '../oracle/modelResolver.js';
 

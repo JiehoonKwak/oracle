@@ -19,6 +19,7 @@ import type {
 import { createGeminiClient } from './gemini.js';
 import { createClaudeClient } from './claude.js';
 import { isOpenRouterBaseUrl } from './modelResolver.js';
+import { resolveProvider } from './providerResolver.js';
 
 export function createDefaultClientFactory(): ClientFactory {
   const customFactory = loadCustomClientFactory();
@@ -27,11 +28,35 @@ export function createDefaultClientFactory(): ClientFactory {
     key: string,
     options?: { baseUrl?: string; azure?: AzureOptions; model?: ModelName; resolvedModelId?: string; httpTimeoutMs?: number },
   ): ClientLike => {
-    if (options?.model?.startsWith('gemini')) {
+    if (options?.baseUrl) {
+      const modelProvider = options.model ? resolveProvider(options.model) : 'other';
+      // Route known providers to their dedicated clients even when baseUrl is set
+      // (e.g. Claude with ANTHROPIC_BASE_URL). Only bypass for OpenRouter or unknown providers.
+      if (modelProvider === 'google' && !isOpenRouterBaseUrl(options.baseUrl)) {
+        return createGeminiClient(key, options.model!, options.resolvedModelId);
+      }
+      if (modelProvider === 'anthropic' && !isOpenRouterBaseUrl(options.baseUrl)) {
+        return createClaudeClient(key, options.model!, options.resolvedModelId, options.baseUrl);
+      }
+      const openRouter = isOpenRouterBaseUrl(options.baseUrl);
+      const defaultHeaders = openRouter ? buildOpenRouterHeaders() : undefined;
+      const httpTimeoutMs = typeof options.httpTimeoutMs === 'number' && Number.isFinite(options.httpTimeoutMs) && options.httpTimeoutMs > 0
+        ? options.httpTimeoutMs : 20 * 60 * 1000;
+      const instance = new OpenAI({ apiKey: key, timeout: httpTimeoutMs, baseURL: options.baseUrl, defaultHeaders });
+      if (openRouter) return buildOpenRouterCompletionClient(instance);
+      return {
+        responses: {
+          stream: (body) => instance.responses.stream(body) as unknown as Promise<ResponseStreamLike>,
+          create: (body) => instance.responses.create(body) as unknown as Promise<OracleResponse>,
+          retrieve: (id) => instance.responses.retrieve(id) as unknown as Promise<OracleResponse>,
+        },
+      };
+    }
+    if (options?.model && resolveProvider(options.model) === 'google') {
       // Gemini client uses its own SDK; allow passing the already-resolved id for transparency/logging.
       return createGeminiClient(key, options.model, options.resolvedModelId);
     }
-    if (options?.model?.startsWith('claude')) {
+    if (options?.model && resolveProvider(options.model) === 'anthropic') {
       return createClaudeClient(key, options.model, options.resolvedModelId, options.baseUrl);
     }
 
@@ -133,9 +158,6 @@ function loadCustomClientFactory(): ClientFactory | null {
   }
   return null;
 }
-
-// Exposed for tests
-export { loadCustomClientFactory as __loadCustomClientFactory };
 
 function buildOpenRouterCompletionClient(instance: OpenAI): ClientLike {
   const adaptRequest = (body: OracleRequestBody) => {

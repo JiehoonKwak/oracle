@@ -7,12 +7,12 @@ import { estimateUsdCost } from 'tokentally';
 const isRich = (rich?: boolean): boolean => rich ?? Boolean(process.stdout.isTTY && chalk.level > 0);
 const dim = (text: string, rich: boolean): string => (rich ? kleur.dim(text) : text);
 
-export const STATUS_PAD = 9;
-export const MODEL_PAD = 13;
-export const MODE_PAD = 7;
-export const TIMESTAMP_PAD = 19;
-export const CHARS_PAD = 5;
-export const COST_PAD = 7;
+const STATUS_PAD = 9;
+const MODEL_PAD = 13;
+const MODE_PAD = 7;
+const TIMESTAMP_PAD = 19;
+const CHARS_PAD = 5;
+const COST_PAD = 7;
 
 export function formatSessionTableHeader(rich?: boolean): string {
   const header = `${'Status'.padEnd(STATUS_PAD)} ${'Model'.padEnd(MODEL_PAD)} ${'Mode'.padEnd(
@@ -41,10 +41,6 @@ export function formatSessionTableRow(meta: SessionMetadata, options?: { rich?: 
 }
 
 export function resolveSessionCost(meta: SessionMetadata): number | null {
-  const mode = meta.mode ?? meta.options?.mode;
-  if (mode === 'browser') {
-    return null;
-  }
   if (meta.usage?.cost != null) {
     return meta.usage.cost;
   }
@@ -65,7 +61,7 @@ export function resolveSessionCost(meta: SessionMetadata): number | null {
   return cost > 0 ? cost : null;
 }
 
-export function formatTimestampAligned(iso: string): string {
+function formatTimestampAligned(iso: string): string {
   const date = new Date(iso);
   const locale = 'en-US';
   const opts: Intl.DateTimeFormatOptions = {

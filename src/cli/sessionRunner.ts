@@ -3,9 +3,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
   SessionMetadata,
-  SessionMode,
-  BrowserSessionConfig,
-  BrowserRuntimeMetadata,
 } from '../sessionStore.js';
 import type { RunOracleOptions, UsageSummary } from '../oracle.js';
 import {
@@ -16,7 +13,6 @@ import {
   asOracleUserError,
   extractTextOutput,
 } from '../oracle.js';
-import { runBrowserSessionExecution, type BrowserSessionRunnerDeps } from '../browser/sessionRunner.js';
 import { renderMarkdownAnsi } from './markdownRenderer.js';
 import { formatResponseMetadata, formatTransportMetadata } from './sessionDisplay.js';
 import { markErrorLogged } from './errorUtils.js';
@@ -26,7 +22,6 @@ import {
   deriveNotificationSettingsFromMetadata,
 } from './notifier.js';
 import { sessionStore } from '../sessionStore.js';
-import { wait } from '../sessionManager.js';
 import { runMultiModelApiSession } from '../oracle/multiModelRunner.js';
 import { MODEL_CONFIGS, DEFAULT_SYSTEM_PROMPT } from '../oracle/config.js';
 import { isKnownModel } from '../oracle/modelResolver.js';
@@ -38,39 +33,57 @@ import { formatFinishLine } from '../oracle/finishLine.js';
 import { sanitizeOscProgress } from './oscUtils.js';
 import { readFiles } from '../oracle/files.js';
 import { cwd as getCwd } from 'node:process';
-import { resumeBrowserSession } from '../browser/reattach.js';
-import { estimateTokenCount } from '../browser/utils.js';
-import type { BrowserLogger } from '../browser/types.js';
-import { formatElapsed } from '../oracle/format.js';
+
+interface MultiModelJsonOutput {
+  prompt: string;
+  timestamp: string;
+  models: Array<{
+    model: string;
+    response: string;
+    tokens: { in: number; out: number };
+    duration_ms: number;
+  }>;
+}
+
+function buildMultiModelJson(
+  prompt: string,
+  results: Array<{ model: string; text: string; inputTokens: number; outputTokens: number; durationMs: number }>,
+): MultiModelJsonOutput {
+  return {
+    prompt,
+    timestamp: new Date().toISOString(),
+    models: results.map((r) => ({
+      model: r.model,
+      response: r.text,
+      tokens: { in: r.inputTokens, out: r.outputTokens },
+      duration_ms: r.durationMs,
+    })),
+  };
+}
 
 const isTty = process.stdout.isTTY;
 const dim = (text: string): string => (isTty ? kleur.dim(text) : text);
 
-export interface SessionRunParams {
+interface SessionRunParams {
   sessionMeta: SessionMetadata;
   runOptions: RunOracleOptions;
-  mode: SessionMode;
-  browserConfig?: BrowserSessionConfig;
+  mode?: 'api';
   cwd: string;
   log: (message?: string) => void;
   write: (chunk: string) => boolean;
   version: string;
   notifications?: NotificationSettings;
-  browserDeps?: BrowserSessionRunnerDeps;
   muteStdout?: boolean;
 }
 
 export async function performSessionRun({
   sessionMeta,
   runOptions,
-  mode,
-  browserConfig,
   cwd,
   log,
   write,
   version,
   notifications,
-  browserDeps,
   muteStdout = false,
 }: SessionRunParams): Promise<void> {
   const writeInline = (chunk: string): boolean => {
@@ -78,71 +91,15 @@ export async function performSessionRun({
     write(chunk);
     return muteStdout ? true : process.stdout.write(chunk);
   };
+  const mode = 'api' as const;
   await sessionStore.updateSession(sessionMeta.id, {
     status: 'running',
     startedAt: new Date().toISOString(),
     mode,
-    ...(browserConfig ? { browser: { config: browserConfig } } : {}),
   });
   const notificationSettings = notifications ?? deriveNotificationSettingsFromMetadata(sessionMeta, process.env);
   const modelForStatus = runOptions.model ?? sessionMeta.model;
   try {
-    if (mode === 'browser') {
-      if (!browserConfig) {
-        throw new Error('Missing browser configuration for session.');
-      }
-      if (modelForStatus) {
-        await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
-          status: 'running',
-          startedAt: new Date().toISOString(),
-        });
-      }
-      const runnerDeps = {
-        ...browserDeps,
-        persistRuntimeHint: async (runtime: BrowserRuntimeMetadata) => {
-          await sessionStore.updateSession(sessionMeta.id, {
-            status: 'running',
-            browser: { config: browserConfig, runtime },
-          });
-        },
-      };
-      const result = await runBrowserSessionExecution({ runOptions, browserConfig, cwd, log }, runnerDeps);
-      if (modelForStatus) {
-        await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
-          status: 'completed',
-          completedAt: new Date().toISOString(),
-          usage: result.usage,
-        });
-      }
-      await sessionStore.updateSession(sessionMeta.id, {
-        status: 'completed',
-        completedAt: new Date().toISOString(),
-        usage: result.usage,
-        elapsedMs: result.elapsedMs,
-        browser: {
-          config: browserConfig,
-          runtime: result.runtime,
-        },
-        response: undefined,
-        transport: undefined,
-        error: undefined,
-      });
-      await writeAssistantOutput(runOptions.writeOutputPath, result.answerText ?? '', log);
-      await sendSessionNotification(
-        {
-          sessionId: sessionMeta.id,
-          sessionName: sessionMeta.options?.slug ?? sessionMeta.id,
-          mode,
-          model: sessionMeta.model,
-          usage: result.usage,
-          characters: result.answerText?.length,
-        },
-        notificationSettings,
-        log,
-        result.answerText?.slice(0, 140),
-      );
-      return;
-    }
     const multiModels = Array.isArray(runOptions.models) ? runOptions.models.filter(Boolean) : [];
     if (multiModels.length > 1) {
       const [primaryModel] = multiModels;
@@ -324,19 +281,20 @@ export async function performSessionRun({
         log,
       );
       if (runOptions.writeOutputPath) {
-        const savedOutputs: Array<{ model: string; path: string }> = [];
-        for (const entry of summary.fulfilled) {
-          const modelOutputPath = deriveModelOutputPath(runOptions.writeOutputPath, entry.model);
-          const savedPath = await writeAssistantOutput(modelOutputPath, entry.answerText, log);
-          if (savedPath) {
-            savedOutputs.push({ model: entry.model, path: savedPath });
-          }
-        }
-        if (savedOutputs.length > 0) {
-          log(dim('Saved outputs:'));
-          for (const item of savedOutputs) {
-            log(dim(`- ${item.model} -> ${item.path}`));
-          }
+        const jsonOutput = buildMultiModelJson(
+          runOptions.prompt ?? '',
+          summary.fulfilled.map((entry) => ({
+            model: entry.model,
+            text: entry.answerText,
+            inputTokens: entry.usage.inputTokens,
+            outputTokens: entry.usage.outputTokens,
+            durationMs: 0,
+          })),
+        );
+        const jsonPath = runOptions.writeOutputPath.replace(/\.[^.]+$/, '') + '.json';
+        const savedPath = await writeAssistantOutput(jsonPath, JSON.stringify(jsonOutput, null, 2), log);
+        if (savedPath) {
+          log(dim(`Saved multi-model JSON output to ${savedPath}`));
         }
       }
       if (hasFailure) {
@@ -399,69 +357,6 @@ export async function performSessionRun({
     log(`ERROR: ${message}`);
     markErrorLogged(error);
     const userError = asOracleUserError(error);
-    const connectionLost =
-      userError?.category === 'browser-automation' && (userError.details as { stage?: string } | undefined)?.stage === 'connection-lost';
-    const assistantTimeout =
-      userError?.category === 'browser-automation' && (userError.details as { stage?: string } | undefined)?.stage === 'assistant-timeout';
-    if (connectionLost && mode === 'browser') {
-      const runtime = (userError.details as { runtime?: BrowserRuntimeMetadata } | undefined)?.runtime;
-      log(dim('Chrome disconnected before completion; keeping session running for reattach.'));
-      if (modelForStatus) {
-        await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
-          status: 'running',
-          completedAt: undefined,
-        });
-      }
-      await sessionStore.updateSession(sessionMeta.id, {
-        status: 'running',
-        errorMessage: message,
-        mode,
-        browser: {
-          config: browserConfig,
-          runtime: runtime ?? sessionMeta.browser?.runtime,
-        },
-        response: { status: 'running', incompleteReason: 'chrome-disconnected' },
-      });
-      return;
-    }
-    if (assistantTimeout && mode === 'browser') {
-      const runtime = (userError.details as { runtime?: BrowserRuntimeMetadata } | undefined)?.runtime;
-      log(dim('Assistant response timed out; keeping session running for reattach.'));
-      if (modelForStatus) {
-        await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
-          status: 'running',
-          completedAt: undefined,
-        });
-      }
-      await sessionStore.updateSession(sessionMeta.id, {
-        status: 'running',
-        errorMessage: message,
-        mode,
-        browser: {
-          config: browserConfig,
-          runtime: runtime ?? sessionMeta.browser?.runtime,
-        },
-        response: { status: 'running', incompleteReason: 'assistant-timeout' },
-      });
-      const autoReattachIntervalMs = browserConfig?.autoReattachIntervalMs ?? 0;
-      if (autoReattachIntervalMs > 0) {
-        const autoRuntime = runtime ?? sessionMeta.browser?.runtime;
-        const success = await autoReattachUntilComplete({
-          sessionMeta,
-          runtime: autoRuntime ?? undefined,
-          browserConfig,
-          runOptions,
-          modelForStatus,
-          notificationSettings,
-          log,
-        });
-        if (success) {
-          return;
-        }
-      }
-      log(dim(`Reattach later with: oracle session ${sessionMeta.id}`));
-      return;
-    }
     if (userError) {
       log(dim(`User error (${userError.category}): ${userError.message}`));
     }
@@ -480,7 +375,6 @@ export async function performSessionRun({
       completedAt: new Date().toISOString(),
       errorMessage: message,
       mode,
-      browser: browserConfig ? { config: browserConfig } : undefined,
       response: responseMetadata,
       transport: transportMetadata,
       error: userError
@@ -545,137 +439,6 @@ async function writeAssistantOutput(targetPath: string | undefined, content: str
       }
     }
     log(dim(`write-output failed (${reason}); session completed anyway.`));
-  }
-}
-
-async function autoReattachUntilComplete({
-  sessionMeta,
-  runtime,
-  browserConfig,
-  runOptions,
-  modelForStatus,
-  notificationSettings,
-  log,
-}: {
-  sessionMeta: SessionMetadata;
-  runtime?: BrowserRuntimeMetadata;
-  browserConfig?: BrowserSessionConfig;
-  runOptions: RunOracleOptions;
-  modelForStatus?: string;
-  notificationSettings: NotificationSettings;
-  log: (message?: string) => void;
-}): Promise<boolean> {
-  if (!runtime || !browserConfig) {
-    log(dim('Auto-reattach disabled: missing runtime or browser config.'));
-    return false;
-  }
-  const delayMs = Math.max(0, browserConfig.autoReattachDelayMs ?? 0);
-  const intervalMs = Math.max(0, browserConfig.autoReattachIntervalMs ?? 0);
-  if (intervalMs <= 0) {
-    return false;
-  }
-  const timeoutMs =
-    Math.max(0, browserConfig.autoReattachTimeoutMs ?? 0) ||
-    Math.max(0, browserConfig.timeoutMs ?? 0) ||
-    120_000;
-  const maxTotalMs = 2 * 60 * 60 * 1000; // 2h hard cap; avoid infinite polling by default.
-  const maxDeadline = Date.now() + maxTotalMs;
-
-  if (delayMs > 0) {
-    log(dim(`Auto-reattach starting in ${formatElapsed(delayMs)}...`));
-    await wait(delayMs);
-  }
-  log(dim(`Auto-reattach will stop after ${formatElapsed(maxTotalMs)} if no answer is captured.`));
-
-  const logger: BrowserLogger = ((message?: string) => {
-    if (message) {
-      log(dim(message));
-    }
-  }) as BrowserLogger;
-  logger.verbose = true;
-
-  let attempt = 0;
-  for (;;) {
-    const remainingBudgetMs = maxDeadline - Date.now();
-    if (remainingBudgetMs <= 0) {
-      log(dim(`Auto-reattach stopped after ${formatElapsed(maxTotalMs)} without capturing an answer.`));
-      return false;
-    }
-    attempt += 1;
-    log(dim(`Auto-reattach attempt ${attempt}...`));
-    try {
-      const reattachConfig: BrowserSessionConfig = {
-        ...browserConfig,
-        timeoutMs,
-      };
-      const result = await resumeBrowserSession(runtime, reattachConfig, logger, {
-        promptPreview: sessionMeta.promptPreview,
-      });
-      const answerText = result.answerMarkdown || result.answerText || '';
-      const outputTokens = estimateTokenCount(answerText);
-      const logWriter = sessionStore.createLogWriter(sessionMeta.id);
-      logWriter.logLine(`[auto-reattach] captured assistant response on attempt ${attempt}`);
-      logWriter.logLine('Answer:');
-      logWriter.logLine(answerText);
-      logWriter.stream.end();
-      if (modelForStatus) {
-        await sessionStore.updateModelRun(sessionMeta.id, modelForStatus, {
-          status: 'completed',
-          completedAt: new Date().toISOString(),
-          usage: {
-            inputTokens: 0,
-            outputTokens,
-            reasoningTokens: 0,
-            totalTokens: outputTokens,
-          },
-        });
-      }
-      await sessionStore.updateSession(sessionMeta.id, {
-        status: 'completed',
-        completedAt: new Date().toISOString(),
-        usage: {
-          inputTokens: 0,
-          outputTokens,
-          reasoningTokens: 0,
-          totalTokens: outputTokens,
-        },
-        browser: {
-          config: browserConfig,
-          runtime,
-        },
-        response: { status: 'completed' },
-        error: undefined,
-        transport: undefined,
-      });
-      await writeAssistantOutput(runOptions.writeOutputPath, answerText, log);
-      await sendSessionNotification(
-        {
-          sessionId: sessionMeta.id,
-          sessionName: sessionMeta.options?.slug ?? sessionMeta.id,
-          mode: sessionMeta.mode ?? 'browser',
-          model: sessionMeta.model ?? runOptions.model,
-          usage: {
-            inputTokens: 0,
-            outputTokens,
-          },
-          characters: answerText.length,
-        },
-        notificationSettings,
-        log,
-        answerText.slice(0, 140),
-      );
-      log(kleur.green('Auto-reattach succeeded; session marked completed.'));
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      log(dim(`Auto-reattach attempt ${attempt} failed: ${message}`));
-    }
-    const remainingAfterAttemptMs = maxDeadline - Date.now();
-    if (remainingAfterAttemptMs <= 0) {
-      log(dim(`Auto-reattach stopped after ${formatElapsed(maxTotalMs)} without capturing an answer.`));
-      return false;
-    }
-    await wait(Math.min(intervalMs, remainingAfterAttemptMs));
   }
 }
 

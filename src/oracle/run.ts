@@ -47,6 +47,7 @@ import {
   resolveModelConfig,
   normalizeOpenRouterBaseUrl,
 } from './modelResolver.js';
+import { resolveProvider } from './providerResolver.js';
 
 type MarkdownStreamer = ReturnType<typeof createMarkdownStreamer>;
 
@@ -96,7 +97,7 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
 
   let baseUrl = options.baseUrl?.trim();
   if (!baseUrl) {
-    if (options.model.startsWith('grok')) {
+    if (resolveProvider(options.model) === 'xai') {
       baseUrl = resolvedXaiBaseUrl;
     } else if (provider === 'anthropic') {
       baseUrl = process.env.ANTHROPIC_BASE_URL?.trim();
@@ -135,7 +136,8 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
     if (isOpenRouterBaseUrl(baseUrl) || openRouterFallback) {
       return { key: optionsApiKey ?? openRouterApiKey, source: 'OPENROUTER_API_KEY' };
     }
-    if (typeof model === 'string' && model.startsWith('gpt')) {
+    const modelProvider = resolveProvider(model);
+    if (modelProvider === 'openai') {
       if (optionsApiKey) return { key: optionsApiKey, source: 'apiKey option' };
       if (isAzureOpenAI) {
         const key = process.env.AZURE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY;
@@ -143,13 +145,13 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
       }
       return { key: process.env.OPENAI_API_KEY, source: 'OPENAI_API_KEY' };
     }
-    if (typeof model === 'string' && model.startsWith('gemini')) {
+    if (modelProvider === 'google') {
       return { key: optionsApiKey ?? process.env.GEMINI_API_KEY, source: 'GEMINI_API_KEY' };
     }
-    if (typeof model === 'string' && model.startsWith('claude')) {
+    if (modelProvider === 'anthropic') {
       return { key: optionsApiKey ?? process.env.ANTHROPIC_API_KEY, source: 'ANTHROPIC_API_KEY' };
     }
-    if (typeof model === 'string' && model.startsWith('grok')) {
+    if (modelProvider === 'xai') {
       return { key: optionsApiKey ?? process.env.XAI_API_KEY, source: 'XAI_API_KEY' };
     }
     return { key: optionsApiKey ?? openRouterApiKey, source: optionsApiKey ? 'apiKey option' : 'OPENROUTER_API_KEY' };
@@ -158,17 +160,18 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
   const apiKeyResult = getApiKeyForModel(options.model);
   const apiKey = apiKeyResult.key;
   if (!apiKey) {
+    const errorModelProvider = resolveProvider(options.model);
     const envVar = isOpenRouterBaseUrl(baseUrl) || openRouterFallback
       ? 'OPENROUTER_API_KEY'
-      : options.model.startsWith('gpt')
+      : errorModelProvider === 'openai'
         ? isAzureOpenAI
           ? 'AZURE_OPENAI_API_KEY (or OPENAI_API_KEY)'
           : 'OPENAI_API_KEY'
-        : options.model.startsWith('gemini')
+        : errorModelProvider === 'google'
           ? 'GEMINI_API_KEY'
-          : options.model.startsWith('claude')
+          : errorModelProvider === 'anthropic'
             ? 'ANTHROPIC_API_KEY'
-            : options.model.startsWith('grok')
+            : errorModelProvider === 'xai'
               ? 'XAI_API_KEY'
               : 'OPENROUTER_API_KEY';
     throw new PromptValidationError(`Missing ${envVar}. Set it via the environment or a .env file.`, {
@@ -248,7 +251,7 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
   // Track the concrete model id we dispatch to (especially for Gemini preview aliases)
   const effectiveModelId =
     options.effectiveModelId ??
-    (options.model.startsWith('gemini')
+    (resolveProvider(options.model) === 'google'
       ? resolveGeminiModelId(options.model)
       : (modelConfig.apiModel ?? modelConfig.model));
   const requestBody = buildRequestBody({
@@ -353,11 +356,12 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
     };
   }
 
-  const apiEndpoint = modelConfig.model.startsWith('gemini')
+  const modelProviderForDispatch = resolveProvider(modelConfig.model);
+  const apiEndpoint = modelProviderForDispatch === 'google'
     ? undefined
     : isOpenRouterBaseUrl(baseUrl)
       ? baseUrl
-      : modelConfig.model.startsWith('claude')
+      : modelProviderForDispatch === 'anthropic'
         ? process.env.ANTHROPIC_BASE_URL ?? baseUrl
         : baseUrl;
   const clientInstance: ClientLike =
@@ -366,9 +370,9 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
       baseUrl: apiEndpoint,
       azure: options.azure,
       model: options.model,
-      resolvedModelId: modelConfig.model.startsWith('claude')
+      resolvedModelId: modelProviderForDispatch === 'anthropic'
         ? resolveClaudeModelId(effectiveModelId)
-        : modelConfig.model.startsWith('gemini')
+        : modelProviderForDispatch === 'google'
           ? resolveGeminiModelId(effectiveModelId as ModelName)
           : effectiveModelId,
       httpTimeoutMs: options.httpTimeoutMs,

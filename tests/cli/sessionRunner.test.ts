@@ -3,7 +3,7 @@ import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { beforeAll, afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 vi.mock('../../src/oracle.ts', async () => {
   const actual = await vi.importActual<typeof import('../../src/oracle.ts')>('../../src/oracle.ts');
@@ -15,14 +15,6 @@ vi.mock('../../src/oracle.ts', async () => {
 
 vi.mock('../../src/oracle/multiModelRunner.ts', () => ({
   runMultiModelApiSession: vi.fn(),
-}));
-
-vi.mock('../../src/browser/sessionRunner.ts', () => ({
-  runBrowserSessionExecution: vi.fn(),
-}));
-
-vi.mock('../../src/browser/reattach.ts', () => ({
-  resumeBrowserSession: vi.fn(),
 }));
 
 vi.mock('../../src/cli/notifier.ts', () => ({
@@ -52,18 +44,16 @@ vi.mock('../../src/sessionStore.ts', () => ({
 import type { SessionMetadata, SessionModelRun } from '../../src/sessionManager.ts';
 import type { ModelName } from '../../src/oracle.ts';
 import { performSessionRun } from '../../src/cli/sessionRunner.ts';
-import { BrowserAutomationError, FileValidationError, OracleResponseError, OracleTransportError, runOracle } from '../../src/oracle.ts';
+import { FileValidationError, OracleResponseError, OracleTransportError, runOracle } from '../../src/oracle.ts';
 import {
   runMultiModelApiSession,
   type ModelExecutionResult,
   type MultiModelRunSummary,
 } from '../../src/oracle/multiModelRunner.ts';
 import type { OracleResponse, RunOracleResult } from '../../src/oracle.ts';
-import { runBrowserSessionExecution } from '../../src/browser/sessionRunner.ts';
 import { sendSessionNotification } from '../../src/cli/notifier.ts';
 import { getCliVersion } from '../../src/version.ts';
 import { deriveModelOutputPath } from '../../src/cli/sessionRunner.ts';
-import { resumeBrowserSession } from '../../src/browser/reattach.ts';
 
 const baseSessionMeta: SessionMetadata = {
   id: 'sess-1',
@@ -80,16 +70,6 @@ const baseRunOptions = {
 const log = vi.fn();
 const write = vi.fn(() => true);
 const cliVersion = getCliVersion();
-const originalPlatform = process.platform;
-
-beforeAll(() => {
-  // Force macOS platform so browser-mode paths are reachable in Linux/Windows CI
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
-});
-
-afterAll(() => {
-  Object.defineProperty(process, 'platform', { value: originalPlatform });
-});
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -329,15 +309,15 @@ describe('performSessionRun', () => {
     }
   });
 
-	  test('writes per-model outputs during multi-model runs when writeOutputPath provided', async () => {
-	    const summary: MultiModelRunSummary = {
-	      fulfilled: [
-	        {
-	          model: 'gpt-5.2-pro' as ModelName,
-	          usage: { inputTokens: 1, outputTokens: 2, reasoningTokens: 0, totalTokens: 3, cost: 0.01 },
-	          answerText: 'pro answer',
-	          logPath: 'log-pro',
-	        },
+  test('writes multi-model JSON output during multi-model runs when writeOutputPath provided', async () => {
+    const summary: MultiModelRunSummary = {
+      fulfilled: [
+        {
+          model: 'gpt-5.2-pro' as ModelName,
+          usage: { inputTokens: 1, outputTokens: 2, reasoningTokens: 0, totalTokens: 3, cost: 0.01 },
+          answerText: 'pro answer',
+          logPath: 'log-pro',
+        },
         {
           model: 'gemini-3-pro' as ModelName,
           usage: { inputTokens: 1, outputTokens: 2, reasoningTokens: 0, totalTokens: 3, cost: 0.02 },
@@ -350,31 +330,29 @@ describe('performSessionRun', () => {
     };
     vi.mocked(runMultiModelApiSession).mockResolvedValue(summary);
 
-	    await performSessionRun({
-	      sessionMeta: {
-	        ...baseSessionMeta,
-	        models: [
-	          { model: 'gpt-5.2-pro', status: 'pending' } as SessionModelRun,
-	          { model: 'gemini-3-pro', status: 'pending' } as SessionModelRun,
-	        ],
-	      },
-	      runOptions: { ...baseRunOptions, models: ['gpt-5.2-pro', 'gemini-3-pro'], writeOutputPath: '/tmp/out.md' },
-	      mode: 'api',
-	      cwd: '/tmp',
-	      log,
-	      write,
-	      version: cliVersion,
-	    });
+    await performSessionRun({
+      sessionMeta: {
+        ...baseSessionMeta,
+        models: [
+          { model: 'gpt-5.2-pro', status: 'pending' } as SessionModelRun,
+          { model: 'gemini-3-pro', status: 'pending' } as SessionModelRun,
+        ],
+      },
+      runOptions: { ...baseRunOptions, models: ['gpt-5.2-pro', 'gemini-3-pro'], writeOutputPath: '/tmp/out.md' },
+      mode: 'api',
+      cwd: '/tmp',
+      log,
+      write,
+      version: cliVersion,
+    });
 
-	    const writeCalls = (fsPromises.writeFile as unknown as { mock: { calls: unknown[][] } }).mock.calls;
-	    const expectedProPath = path.resolve('/tmp/out.gpt-5.2-pro.md');
-	    const expectedGeminiPath = path.resolve('/tmp/out.gemini-3-pro.md');
-	    expect(writeCalls).toContainEqual([expectedProPath, expect.stringContaining('pro answer\n'), 'utf8']);
-	    expect(writeCalls).toContainEqual([expectedGeminiPath, expect.stringContaining('gemini answer\n'), 'utf8']);
-	    const logLines = log.mock.calls.map((c) => c[0]).join('\n');
-	    expect(logLines).toContain('Saved outputs:');
-	    expect(logLines).toContain(`gpt-5.2-pro -> ${expectedProPath}`);
-	  });
+    const writeCalls = (fsPromises.writeFile as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const expectedJsonPath = path.resolve('/tmp/out.json');
+    expect(writeCalls).toContainEqual([expectedJsonPath, expect.stringContaining('"pro answer"'), 'utf8']);
+    expect(writeCalls).toContainEqual([expectedJsonPath, expect.stringContaining('"gemini answer"'), 'utf8']);
+    const logLines = log.mock.calls.map((c) => c[0]).join('\n');
+    expect(logLines).toContain('Saved multi-model JSON output');
+  });
 
   test('prints one aggregate header and colored summary for multi-model runs', async () => {
     const sessionMeta = {
@@ -429,9 +407,9 @@ describe('performSessionRun', () => {
     expect((logsCombined.match(/Tip: no files attached/g) ?? []).length).toBe(1);
     expect((logsCombined.match(/Tip: brief prompts often yield generic answers/g) ?? []).length).toBe(1);
     expect(logsCombined).toContain('2/2 models');
-    expect(logsCombined).toContain('↑');
-    expect(logsCombined).toContain('↓');
-    expect(logsCombined).toContain('Δ');
+    expect(logsCombined).toContain('\u2191');
+    expect(logsCombined).toContain('\u2193');
+    expect(logsCombined).toContain('\u0394');
 
     writeSpy.mockRestore();
     logSpy.mockRestore();
@@ -636,68 +614,6 @@ describe('performSessionRun', () => {
     }
   }, 10_000);
 
-  test('invokes browser runner when mode is browser', async () => {
-    vi.mocked(runBrowserSessionExecution).mockResolvedValue({
-      usage: { inputTokens: 100, outputTokens: 50, reasoningTokens: 0, totalTokens: 150 },
-      elapsedMs: 2000,
-      runtime: { chromePid: 123, chromePort: 9222, userDataDir: '/tmp/profile' },
-      answerText: 'Answer',
-    });
-
-    await performSessionRun({
-      sessionMeta: baseSessionMeta,
-      runOptions: baseRunOptions,
-      mode: 'browser',
-      browserConfig: { chromePath: null },
-      cwd: '/tmp',
-      log,
-      write,
-      version: cliVersion,
-    });
-
-    expect(vi.mocked(runBrowserSessionExecution)).toHaveBeenCalled();
-    expect(vi.mocked(sendSessionNotification)).toHaveBeenCalled();
-    const finalUpdate = sessionStoreMock.updateSession.mock.calls.at(-1)?.[1];
-    expect(finalUpdate).toMatchObject({
-      status: 'completed',
-      browser: expect.objectContaining({ runtime: expect.objectContaining({ chromePid: 123 }) }),
-    });
-	    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-	      baseSessionMeta.id,
-	      'gpt-5.2-pro',
-	      expect.objectContaining({ status: 'running' }),
-	    );
-	    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-	      baseSessionMeta.id,
-	      'gpt-5.2-pro',
-	      expect.objectContaining({ status: 'completed' }),
-	    );
-	  });
-
-  test('writes browser answers to disk when writeOutputPath provided', async () => {
-    vi.mocked(runBrowserSessionExecution).mockResolvedValue({
-      usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0, totalTokens: 15 },
-      elapsedMs: 500,
-      runtime: { chromePid: 1, chromePort: 9222, userDataDir: '/tmp/chrome' },
-      answerText: 'browser answer',
-    });
-
-    await performSessionRun({
-      sessionMeta: baseSessionMeta,
-      runOptions: { ...baseRunOptions, writeOutputPath: '/tmp/browser-out.md' },
-      mode: 'browser',
-      browserConfig: { chromePath: null },
-      cwd: '/tmp',
-      log,
-      write,
-      version: cliVersion,
-    });
-
-    const writeCalls = (fsPromises.writeFile as unknown as { mock: { calls: unknown[][] } }).mock.calls;
-    const expectedPath = path.resolve('/tmp/browser-out.md');
-    expect(writeCalls).toContainEqual([expectedPath, expect.stringContaining('browser answer\n'), 'utf8']);
-  });
-
   test('write-output failures warn but keep session successful', async () => {
     const liveResult: RunOracleResult = {
       mode: 'live',
@@ -767,155 +683,10 @@ describe('performSessionRun', () => {
     expect(logLines).toContain('refusing to write inside session storage');
   });
 
-	  test('deriveModelOutputPath appends model when base has no extension', () => {
-	    const result = deriveModelOutputPath('/tmp/out', 'gpt-5.2-pro');
-	    const expected = path.join(path.dirname('/tmp/out'), 'out.gpt-5.2-pro');
-	    expect(result).toBe(expected);
-	  });
-
-  test('records metadata when browser automation fails', async () => {
-    const automationError = new BrowserAutomationError('automation failed', { stage: 'execute-browser' });
-    vi.mocked(runBrowserSessionExecution).mockRejectedValueOnce(automationError);
-
-    await expect(
-      performSessionRun({
-        sessionMeta: baseSessionMeta,
-        runOptions: baseRunOptions,
-        mode: 'browser',
-        browserConfig: { chromePath: null },
-        cwd: '/tmp',
-        log,
-        write,
-        version: cliVersion,
-      }),
-    ).rejects.toThrow('automation failed');
-
-    const finalUpdate = sessionStoreMock.updateSession.mock.calls.at(-1)?.[1];
-    expect(finalUpdate).toMatchObject({
-      status: 'error',
-      errorMessage: 'automation failed',
-      browser: expect.objectContaining({ config: expect.any(Object) }),
-    });
-	    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-	      baseSessionMeta.id,
-	      'gpt-5.2-pro',
-	      expect.objectContaining({ status: 'error' }),
-	    );
-    const logLines = log.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(logLines).not.toContain('Next steps (browser fallback)');
-    expect(logLines).not.toContain('--engine api');
-  });
-
-  test('keeps session running when assistant response times out', async () => {
-    const automationError = new BrowserAutomationError('assistant timed out', {
-      stage: 'assistant-timeout',
-      runtime: { chromePort: 9222, chromeHost: '127.0.0.1', tabUrl: 'https://chatgpt.com/c/demo' },
-    });
-    vi.mocked(runBrowserSessionExecution).mockRejectedValueOnce(automationError);
-
-    await performSessionRun({
-      sessionMeta: baseSessionMeta,
-      runOptions: baseRunOptions,
-      mode: 'browser',
-      browserConfig: { chromePath: null },
-      cwd: '/tmp',
-      log,
-      write,
-      version: cliVersion,
-    });
-
-    const finalUpdate = sessionStoreMock.updateSession.mock.calls.at(-1)?.[1];
-    expect(finalUpdate).toMatchObject({
-      status: 'running',
-      response: { status: 'running', incompleteReason: 'assistant-timeout' },
-      browser: expect.objectContaining({ runtime: expect.objectContaining({ chromePort: 9222 }) }),
-    });
-    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-      baseSessionMeta.id,
-      'gpt-5.2-pro',
-      expect.objectContaining({ status: 'running' }),
-    );
-    const logLines = log.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(logLines).toContain('Assistant response timed out; keeping session running for reattach.');
-  });
-
-  test('auto-reattaches after assistant timeout when configured', async () => {
-    const automationError = new BrowserAutomationError('assistant timed out', {
-      stage: 'assistant-timeout',
-      runtime: { chromePort: 9222, chromeHost: '127.0.0.1', tabUrl: 'https://chatgpt.com/c/demo' },
-    });
-    vi.mocked(runBrowserSessionExecution).mockRejectedValueOnce(automationError);
-    vi.mocked(resumeBrowserSession).mockResolvedValue({
-      answerText: 'ok text',
-      answerMarkdown: 'ok markdown',
-    });
-
-    await performSessionRun({
-      sessionMeta: baseSessionMeta,
-      runOptions: baseRunOptions,
-      mode: 'browser',
-      browserConfig: {
-        chromePath: null,
-        autoReattachDelayMs: 0,
-        autoReattachIntervalMs: 1000,
-        autoReattachTimeoutMs: 1000,
-      },
-      cwd: '/tmp',
-      log,
-      write,
-      version: cliVersion,
-    });
-
-    expect(vi.mocked(resumeBrowserSession)).toHaveBeenCalled();
-    const finalUpdate = sessionStoreMock.updateSession.mock.calls.at(-1)?.[1];
-    expect(finalUpdate).toMatchObject({
-      status: 'completed',
-      response: { status: 'completed' },
-    });
-    expect(vi.mocked(sendSessionNotification)).toHaveBeenCalled();
-  });
-
-  test('auto-reattach stops after a hard cap when it cannot capture an answer', async () => {
-    vi.useFakeTimers();
-    try {
-      const automationError = new BrowserAutomationError('assistant timed out', {
-        stage: 'assistant-timeout',
-        runtime: { chromePort: 9222, chromeHost: '127.0.0.1', tabUrl: 'https://chatgpt.com/c/demo' },
-      });
-      vi.mocked(runBrowserSessionExecution).mockRejectedValueOnce(automationError);
-      vi.mocked(resumeBrowserSession).mockRejectedValue(new Error('not ready'));
-
-      const pending = performSessionRun({
-        sessionMeta: baseSessionMeta,
-        runOptions: baseRunOptions,
-        mode: 'browser',
-        browserConfig: {
-          chromePath: null,
-          autoReattachDelayMs: 0,
-          autoReattachIntervalMs: 60 * 60 * 1000,
-          autoReattachTimeoutMs: 1000,
-        },
-        cwd: '/tmp',
-        log,
-        write,
-        version: cliVersion,
-      });
-
-      await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000 + 5_000);
-      await pending;
-
-      expect(vi.mocked(resumeBrowserSession).mock.calls.length).toBeGreaterThanOrEqual(2);
-      const finalUpdate = sessionStoreMock.updateSession.mock.calls.at(-1)?.[1];
-      expect(finalUpdate).toMatchObject({
-        status: 'running',
-        response: { status: 'running', incompleteReason: 'assistant-timeout' },
-      });
-      const logLines = log.mock.calls.map((c) => String(c[0])).join('\n');
-      expect(logLines).toContain('Auto-reattach stopped');
-      expect(logLines).toContain('Reattach later with: oracle session');
-    } finally {
-      vi.useRealTimers();
-    }
+  test('deriveModelOutputPath appends model when base has no extension', () => {
+    const result = deriveModelOutputPath('/tmp/out', 'gpt-5.2-pro');
+    const expected = path.join(path.dirname('/tmp/out'), 'out.gpt-5.2-pro');
+    expect(result).toBe(expected);
   });
 
   test('records response metadata when runOracle throws OracleResponseError', async () => {
@@ -930,7 +701,7 @@ describe('performSessionRun', () => {
         cwd: '/tmp',
         log,
         write,
-      version: cliVersion,
+        version: cliVersion,
       }),
     ).rejects.toThrow('boom');
 
@@ -939,16 +710,16 @@ describe('performSessionRun', () => {
       status: 'error',
       response: expect.objectContaining({ responseId: 'resp-error' }),
     });
-	    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-	      baseSessionMeta.id,
-	      'gpt-5.2-pro',
-	      expect.objectContaining({ status: 'running' }),
-	    );
-	    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-	      baseSessionMeta.id,
-	      'gpt-5.2-pro',
-	      expect.objectContaining({ status: 'error' }),
-	    );
+    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
+      baseSessionMeta.id,
+      'gpt-5.2-pro',
+      expect.objectContaining({ status: 'running' }),
+    );
+    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
+      baseSessionMeta.id,
+      'gpt-5.2-pro',
+      expect.objectContaining({ status: 'error' }),
+    );
   });
 
   test('captures transport failures when OracleTransportError thrown', async () => {
@@ -962,7 +733,7 @@ describe('performSessionRun', () => {
         cwd: '/tmp',
         log,
         write,
-      version: cliVersion,
+        version: cliVersion,
       }),
     ).rejects.toThrow('timeout');
 
@@ -971,11 +742,11 @@ describe('performSessionRun', () => {
       status: 'error',
       transport: { reason: 'client-timeout' },
     });
-	    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-	      baseSessionMeta.id,
-	      'gpt-5.2-pro',
-	      expect.objectContaining({ status: 'error' }),
-	    );
+    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
+      baseSessionMeta.id,
+      'gpt-5.2-pro',
+      expect.objectContaining({ status: 'error' }),
+    );
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Transport'));
   });
 
@@ -1013,7 +784,7 @@ describe('performSessionRun', () => {
         cwd: '/tmp',
         log,
         write,
-      version: cliVersion,
+        version: cliVersion,
       }),
     ).rejects.toThrow('too large');
 
@@ -1022,11 +793,11 @@ describe('performSessionRun', () => {
       status: 'error',
       error: expect.objectContaining({ category: 'file-validation', message: 'too large' }),
     });
-	    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
-	      baseSessionMeta.id,
-	      'gpt-5.2-pro',
-	      expect.objectContaining({ status: 'error' }),
-	    );
+    expect(sessionStoreMock.updateModelRun).toHaveBeenCalledWith(
+      baseSessionMeta.id,
+      'gpt-5.2-pro',
+      expect.objectContaining({ status: 'error' }),
+    );
     expect(log).toHaveBeenCalledWith(expect.stringContaining('User error (file-validation)'));
   });
 });

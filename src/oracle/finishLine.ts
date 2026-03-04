@@ -1,6 +1,6 @@
 import { formatUSD } from './format.js';
 
-export function formatElapsedCompact(ms: number): string {
+function formatElapsedCompact(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) {
     return 'unknown';
   }

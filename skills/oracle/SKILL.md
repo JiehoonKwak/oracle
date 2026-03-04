@@ -3,109 +3,84 @@ name: oracle
 description: Use the @steipete/oracle CLI to bundle a prompt plus the right files and get a second-model review (API or browser) for debugging, refactors, design checks, or cross-validation.
 ---
 
-# Oracle (CLI) — best use
+# Oracle — Second-Model Review via CLI
 
-Oracle bundles your prompt + selected files into one “one-shot” request so another model can answer with real repo context (API or browser automation). Treat outputs as advisory: verify against the codebase + tests.
+One-shot LLM queries with full file context. Use when you need a second opinion from a different model, cross-validation across providers, or a fresh perspective on a problem.
 
-## Main use case (browser, GPT‑5.2 Pro)
+Oracle is stateless — every run gets the full context (project briefing + files + question). It cannot see your project unless you pass `--file`.
 
-Default workflow here: `--engine browser` with GPT‑5.2 Pro in ChatGPT. This is the “human in the loop” path: it can take ~10 minutes to ~1 hour; expect a stored session you can reattach to.
+## When to Use
 
-Recommended defaults:
-- Engine: browser (`--engine browser`)
-- Model: GPT‑5.2 Pro (either `--model gpt-5.2-pro` or a ChatGPT picker label like `--model "5.2 Pro"`)
-- Attachments: directories/globs + excludes; avoid secrets.
+- Stuck or looping on a problem → get a different model's take
+- Code review or refactor validation → multi-model cross-check
+- Architecture decision → compare reasoning across providers
+- Debugging → fresh eyes with full file context
 
-## Golden path (fast + reliable)
+## Examples
 
-1. Pick a tight file set (fewest files that still contain the truth).
-2. Preview what you’re about to send (`--dry-run` + `--files-report` when needed).
-3. Run in browser mode for the usual GPT‑5.2 Pro ChatGPT workflow; use API only when you explicitly want it.
-4. If the run detaches/timeouts: reattach to the stored session (don’t re-run).
+### 1. Second opinion (single model)
 
-## Commands (preferred)
+```bash
+oracle -p "I'm stuck on [problem]. I've tried [approach]. What am I missing?" \
+  --file src/relevant.ts --file src/related.ts
+```
 
-- Show help (once/session):
-  - `npx -y @steipete/oracle --help`
+### 2. Multi-model cross-validation
 
-- Preview (no tokens):
-  - `npx -y @steipete/oracle --dry-run summary -p "<task>" --file "src/**" --file "!**/*.test.*"`
-  - `npx -y @steipete/oracle --dry-run full -p "<task>" --file "src/**"`
+Config defaults apply automatically when no `--model`/`--models` on CLI:
 
-- Token/cost sanity:
-  - `npx -y @steipete/oracle --dry-run summary --files-report -p "<task>" --file "src/**"`
+```bash
+# Uses config.models (e.g. gemini + grok in parallel)
+oracle -p "Review this approach and flag any issues" \
+  --file "src/**/*.ts"
+```
 
-- Browser run (main path; long-running is normal):
-  - `npx -y @steipete/oracle --engine browser --model gpt-5.2-pro -p "<task>" --file "src/**"`
+Override for a specific run:
 
-- Manual paste fallback (assemble bundle, copy to clipboard):
-  - `npx -y @steipete/oracle --render --copy -p "<task>" --file "src/**"`
-  - Note: `--copy` is a hidden alias for `--copy-markdown`.
+```bash
+oracle --models "google/gemini-3.1-pro-preview,x-ai/grok-4.1-fast" \
+  -p "Cross-check assumptions in data layer" --file "src/**/*.ts"
+```
 
-## Attaching files (`--file`)
+### 3. Complex prompt from file
 
-`--file` accepts files, directories, and globs. You can pass it multiple times; entries can be comma-separated.
+When the prompt needs structure, code blocks, or multi-line content:
 
-- Include:
-  - `--file "src/**"` (directory glob)
-  - `--file src/index.ts` (literal file)
-  - `--file docs --file README.md` (literal directory + file)
+```bash
+oracle -P prompt.md --file "src/**/*.ts"
+```
 
-- Exclude (prefix with `!`):
-  - `--file "src/**" --file "!src/**/*.test.ts" --file "!**/*.snap"`
+### 4. Dry run (check token budget before calling API)
 
-- Defaults (important behavior from the implementation):
-  - Default-ignored dirs: `node_modules`, `dist`, `coverage`, `.git`, `.turbo`, `.next`, `build`, `tmp` (skipped unless you explicitly pass them as literal dirs/files).
-  - Honors `.gitignore` when expanding globs.
-  - Does not follow symlinks (glob expansion uses `followSymbolicLinks: false`).
-  - Dotfiles are filtered unless you explicitly opt in with a pattern that includes a dot-segment (e.g. `--file ".github/**"`).
-  - Hard cap: files > 1 MB are rejected (split files or narrow the match).
+```bash
+oracle --dry-run -p "Review auth flow" --file "src/auth/**"
+```
 
-## Budget + observability
+## Key Flags
 
-- Target: keep total input under ~196k tokens.
-- Use `--files-report` (and/or `--dry-run json`) to spot the token hogs before spending.
-- If you need hidden/advanced knobs: `npx -y @steipete/oracle --help --verbose`.
+| Flag | Purpose |
+|------|---------|
+| `-p "text"` | Inline prompt |
+| `-P path` | Read prompt from file (avoids shell escaping) |
+| `-f / --file <globs>` | Files/dirs to attach (required for context) |
+| `-m model` | Single model override |
+| `--models "a,b"` | Parallel multi-model query |
+| `--dry-run` | Preview token usage without calling API |
+| `--write-output path` | Save response to file |
 
-## Engines (API vs browser)
+## Prompt Crafting
 
-- Auto-pick: uses `api` when `OPENAI_API_KEY` is set, otherwise `browser`.
-- Browser engine supports GPT + Gemini only; use `--engine api` for Claude/Grok/Codex or multi-model runs.
-- **API runs require explicit user consent** before starting because they incur usage costs.
-- Browser attachments:
-  - `--browser-attachments auto|never|always` (auto pastes inline up to ~60k chars then uploads).
-- Remote browser host (signed-in machine runs automation):
-  - Host: `oracle serve --host 0.0.0.0 --port 9473 --token <secret>`
-  - Client: `oracle --engine browser --remote-host <host:port> --remote-token <secret> -p "<task>" --file "src/**"`
+Oracle is one-shot with no memory. Every prompt must be self-contained:
 
-## Sessions + slugs (don’t lose work)
+1. **Project context**: what the project does, tech stack
+2. **Relevant files**: attach via `--file` (directories and globs work)
+3. **Specific question**: what you need reviewed, what you've tried
+4. **Constraints**: deadlines, dependencies, architecture limits
 
-- Stored under `~/.oracle/sessions` (override with `ORACLE_HOME_DIR`).
-- Runs may detach or take a long time (browser + GPT‑5.2 Pro often does). If the CLI times out: don’t re-run; reattach.
-  - List: `oracle status --hours 72`
-  - Attach: `oracle session <id> --render`
-- Use `--slug "<3-5 words>"` to keep session IDs readable.
-- Duplicate prompt guard exists; use `--force` only when you truly want a fresh run.
+Aim for 6–30 sentences in the prompt. Brief prompts yield generic answers.
 
-## Prompt template (high signal)
+## Model Priority
 
-Oracle starts with **zero** project knowledge. Assume the model cannot infer your stack, build tooling, conventions, or “obvious” paths. Include:
-- Project briefing (stack + build/test commands + platform constraints).
-- “Where things live” (key directories, entrypoints, config files, dependency boundaries).
-- Exact question + what you tried + the error text (verbatim).
-- Constraints (“don’t change X”, “must keep public API”, “perf budget”, etc).
-- Desired output (“return patch plan + tests”, “list risky assumptions”, “give 3 options with tradeoffs”).
+`CLI --models` > `CLI --model` > `config.models` > default model.
 
-### “Exhaustive prompt” pattern (for later restoration)
-
-When you know this will be a long investigation, write a prompt that can stand alone later:
-- Top: 6–30 sentence project briefing + current goal.
-- Middle: concrete repro steps + exact errors + what you already tried.
-- Bottom: attach *all* context files needed so a fresh model can fully understand (entrypoints, configs, key modules, docs).
-
-If you need to reproduce the same context later, re-run with the same prompt + `--file …` set (Oracle runs are one-shot; the model doesn’t remember prior runs).
-
-## Safety
-
-- Don’t attach secrets by default (`.env`, key files, auth tokens). Redact aggressively; share only what’s required.
-- Prefer “just enough context”: fewer files + better prompt beats whole-repo dumps.
+Use `google/` or `x-ai/` prefixed IDs for exact model versions routed to native APIs.

@@ -1,4 +1,3 @@
-import notifier from 'toasted-notifier';
 import { spawn } from 'node:child_process';
 import { formatUSD, formatNumber } from '../oracle/format.js';
 import { MODEL_CONFIGS } from '../oracle/config.js';
@@ -9,6 +8,16 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadToastedNotifier(): Promise<{ notify: (opts: any) => void | Promise<void> } | null> {
+  try {
+    const mod = await import('toasted-notifier');
+    return mod.default ?? mod;
+  } catch {
+    return null;
+  }
+}
 
 export interface NotificationSettings {
   enabled: boolean;
@@ -78,19 +87,25 @@ export async function sendSessionNotification(
     }
     if (!(await shouldSkipToastedNotifier())) {
       // Fallback to toasted-notifier (cross-platform). macAppIconOption() is only honored on macOS.
-      await notifier.notify({
-        title,
-        message,
-        sound: settings.sound,
-      });
-      return;
+      const toasted = await loadToastedNotifier();
+      if (toasted) {
+        await toasted.notify({
+          title,
+          message,
+          sound: settings.sound,
+        });
+        return;
+      }
     }
   } catch (error) {
     if (isMacExecError(error)) {
       const repaired = await repairMacNotifier(log);
       if (repaired) {
         try {
-          await notifier.notify({ title, message, sound: settings.sound, ...(macAppIconOption()) });
+          const toastedRetry = await loadToastedNotifier();
+          if (toastedRetry) {
+            await toastedRetry.notify({ title, message, sound: settings.sound, ...(macAppIconOption()) });
+          }
           return;
         } catch (retryError) {
           const reason = describeNotifierError(retryError);

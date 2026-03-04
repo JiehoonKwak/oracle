@@ -23,5 +23,5 @@
     }
   },
   "include": ["bin/**/*.ts", "scripts/**/*.ts", "src/**/*.ts", "tests/**/*.ts", "types/**/*.d.ts"],
-  "exclude": ["node_modules", "dist", ".bun-check"]
+  "exclude": ["node_modules", "dist", ".bun-check", "scripts/debug"]
 }

@@ -113,8 +113,6 @@ export { wait } from './sessionManager.js';
 export type {
   SessionMetadata,
   SessionMode,
-  BrowserSessionConfig,
-  BrowserRuntimeMetadata,
   SessionTransportMetadata,
   SessionUserErrorMetadata,
   SessionStatus,

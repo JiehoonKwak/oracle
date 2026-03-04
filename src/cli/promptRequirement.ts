@@ -1,5 +1,6 @@
 interface PromptCheckOptions {
   prompt?: string;
+  promptFile?: string;
   session?: string;
   execSession?: string;
   status?: boolean;
@@ -19,13 +20,14 @@ export function shouldRequirePrompt(rawArgs: string[], options: PromptCheckOptio
   const firstArg = rawArgs[0];
   const bypassPrompt = Boolean(
     options.session ||
-      options.execSession ||
-      options.status ||
-      options.debugHelp ||
-      firstArg === 'status' ||
-      firstArg === 'session',
+    options.execSession ||
+    options.status ||
+    options.debugHelp ||
+    firstArg === "status" ||
+    firstArg === "session",
   );
 
-  const requiresPrompt = options.renderMarkdown || Boolean(options.preview) || Boolean(options.dryRun) || !bypassPrompt;
-  return requiresPrompt && !options.prompt;
+  const requiresPrompt =
+    options.renderMarkdown || Boolean(options.preview) || Boolean(options.dryRun) || !bypassPrompt;
+  return requiresPrompt && !options.prompt && !options.promptFile;
 }

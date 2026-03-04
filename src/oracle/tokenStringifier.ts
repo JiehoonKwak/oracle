@@ -18,5 +18,3 @@ export function stringifyTokenizerInput(input: unknown): string {
   }
   return String(input);
 }
-
-export default stringifyTokenizerInput;

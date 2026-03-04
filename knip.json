@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "bin/oracle-cli.ts",
+    "src/oracle.ts",
+    "scripts/*.ts",
+    "tests/**/*.test.ts"
+  ],
+  "project": [
+    "bin/**/*.ts",
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "ignore": [
+    "scripts/debug/**",
+    "probe-cookies.tsx"
+  ],
+  "ignoreDependencies": [
+    "toasted-notifier",
+    "@cdktf/node-pty-prebuilt-multiarch",
+    "@homebridge/node-pty-prebuilt-multiarch"
+  ]
+}

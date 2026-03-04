@@ -181,6 +181,13 @@ describe('resolveApiModel', () => {
   test('passes through unknown names (OpenRouter/custom)', () => {
     expect(resolveApiModel('instant')).toBe('instant');
   });
+
+  test('passes through slash-prefixed OpenRouter model IDs without keyword hijacking', () => {
+    expect(resolveApiModel('google/gemini-3.1-pro-preview')).toBe('google/gemini-3.1-pro-preview');
+    expect(resolveApiModel('x-ai/grok-4.1-fast')).toBe('x-ai/grok-4.1-fast');
+    expect(resolveApiModel('anthropic/claude-4.5-sonnet')).toBe('anthropic/claude-4.5-sonnet');
+    expect(resolveApiModel('openai/gpt-5.2-pro')).toBe('openai/gpt-5.2-pro');
+  });
 });
 
 describe('inferModelFromLabel', () => {
@@ -225,8 +232,8 @@ describe('inferModelFromLabel', () => {
     expect(inferModelFromLabel('Grok-4-1')).toBe('grok-4.1');
   });
 
-  test('falls back to gpt-5.2-pro when label empty and to gpt-5.2 for other ambiguous strings', () => {
-    expect(inferModelFromLabel('')).toBe('gpt-5.2-pro');
+  test('falls back to default model when label empty and to gpt-5.2 for other ambiguous strings', () => {
+    expect(inferModelFromLabel('')).toBe('google/gemini-3.1-pro-preview');
     expect(inferModelFromLabel('something else')).toBe('gpt-5.2');
   });
 });

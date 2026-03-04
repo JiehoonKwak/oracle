@@ -32,12 +32,11 @@ describe('sessionStore', () => {
     expect(request?.prompt).toBe('Inspect me');
   });
 
-  test('persists waitPreference and gemini browser metadata for restarts', async () => {
+  test('persists waitPreference and gemini metadata for restarts', async () => {
     const meta = await store.createSession(
       {
         prompt: 'Persist me',
         model: 'gemini-3-pro',
-        mode: 'browser',
         waitPreference: false,
         youtube: 'https://example.com/video',
         generateImage: 'in.png',

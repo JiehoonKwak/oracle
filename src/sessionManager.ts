@@ -2,74 +2,13 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import type { WriteStream } from 'node:fs';
-import net from 'node:net';
-import type { BrowserModelStrategy, CookieParam } from './browser/types.js';
 import type { TransportFailureReason, AzureOptions, ModelName, ThinkingTimeLevel } from './oracle.js';
 import { DEFAULT_MODEL, formatElapsed } from './oracle.js';
 import { safeModelSlug } from './oracle/modelResolver.js';
 import { getOracleHomeDir } from './oracleHome.js';
 
+/** @deprecated 'browser' kept for stored session compat. New sessions are always 'api'. */
 export type SessionMode = 'api' | 'browser';
-
-export interface BrowserSessionConfig {
-  chromeProfile?: string | null;
-  chromePath?: string | null;
-  chromeCookiePath?: string | null;
-  chatgptUrl?: string | null;
-  url?: string;
-  timeoutMs?: number;
-  debugPort?: number | null;
-  inputTimeoutMs?: number;
-  /** Delay before rechecking the conversation after an assistant timeout. */
-  assistantRecheckDelayMs?: number;
-  /** Time budget for the delayed recheck attempt. */
-  assistantRecheckTimeoutMs?: number;
-  /** Wait for an existing shared Chrome to appear before launching a new one. */
-  reuseChromeWaitMs?: number;
-  /** Max time to wait for a shared manual-login profile lock (serializes parallel runs). */
-  profileLockTimeoutMs?: number;
-  /** Delay before starting periodic auto-reattach attempts after a timeout. */
-  autoReattachDelayMs?: number;
-  /** Interval between auto-reattach attempts (0 disables). */
-  autoReattachIntervalMs?: number;
-  /** Time budget for each auto-reattach attempt. */
-  autoReattachTimeoutMs?: number;
-  cookieSync?: boolean;
-  cookieNames?: string[] | null;
-  cookieSyncWaitMs?: number;
-  inlineCookies?: CookieParam[] | null;
-  inlineCookiesSource?: string | null;
-  headless?: boolean;
-  keepBrowser?: boolean;
-  hideWindow?: boolean;
-  desiredModel?: string | null;
-  modelStrategy?: BrowserModelStrategy;
-  debug?: boolean;
-  allowCookieErrors?: boolean;
-  remoteChrome?: { host: string; port: number } | null;
-  manualLogin?: boolean;
-  manualLoginProfileDir?: string | null;
-  manualLoginCookieSync?: boolean;
-  /** Thinking time intensity: 'light', 'standard', 'extended', 'heavy' */
-  thinkingTime?: ThinkingTimeLevel;
-}
-
-export interface BrowserRuntimeMetadata {
-  chromePid?: number;
-  chromePort?: number;
-  chromeHost?: string;
-  userDataDir?: string;
-  chromeTargetId?: string;
-  tabUrl?: string;
-  conversationId?: string;
-  /** PID of the controller process that launched this browser run. Helps detect orphaned sessions. */
-  controllerPid?: number;
-}
-
-export interface BrowserMetadata {
-  config?: BrowserSessionConfig;
-  runtime?: BrowserRuntimeMetadata;
-}
 
 export interface SessionResponseMetadata {
   id?: string;
@@ -100,12 +39,8 @@ export interface StoredRunOptions {
   filesReport?: boolean;
   slug?: string;
   mode?: SessionMode;
-  browserConfig?: BrowserSessionConfig;
   verbose?: boolean;
   heartbeatIntervalMs?: number;
-  browserAttachments?: 'auto' | 'never' | 'always';
-  browserInlineFiles?: boolean;
-  browserBundleFiles?: boolean;
   background?: boolean;
   search?: boolean;
   baseUrl?: string;
@@ -149,7 +84,6 @@ export interface SessionMetadata {
   };
   errorMessage?: string;
   elapsedMs?: number;
-  browser?: BrowserMetadata;
   response?: SessionResponseMetadata;
   transport?: SessionTransportMetadata;
   error?: SessionUserErrorMetadata;
@@ -207,7 +141,6 @@ const MODEL_JSON_EXTENSION = '.json';
 const MODEL_LOG_EXTENSION = '.log';
 const MAX_STATUS_LIMIT = 1000;
 const ZOMBIE_MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes
-const CHROME_RUNTIME_TIMEOUT_MS = 250;
 const DEFAULT_SLUG = 'session';
 const MAX_SLUG_WORDS = 5;
 const MIN_CUSTOM_SLUG_WORDS = 3;
@@ -362,10 +295,6 @@ export async function updateModelRunMetadata(
   return next;
 }
 
-export async function readModelRunMetadata(sessionId: string, model: string): Promise<SessionModelRun | null> {
-  return readModelRunFile(sessionId, model);
-}
-
 export async function initializeSession(
   options: InitializeSessionOptions,
   cwd: string,
@@ -377,8 +306,7 @@ export async function initializeSession(
   const sessionId = await ensureUniqueSessionId(baseSlug);
   const dir = sessionDir(sessionId);
   await ensureDir(dir);
-  const mode = options.mode ?? 'api';
-  const browserConfig = options.browserConfig;
+  const mode: SessionMode = 'api';
   const modelList: ModelName[] =
     Array.isArray(options.models) && options.models.length > 0
       ? options.models
@@ -398,7 +326,6 @@ export async function initializeSession(
     })),
     cwd,
     mode,
-    browser: browserConfig ? { config: browserConfig } : undefined,
     notifications,
     options: {
       prompt: options.prompt,
@@ -413,12 +340,8 @@ export async function initializeSession(
       filesReport: options.filesReport,
       slug: sessionId,
       mode,
-      browserConfig,
       verbose: options.verbose,
       heartbeatIntervalMs: options.heartbeatIntervalMs,
-      browserAttachments: options.browserAttachments,
-      browserInlineFiles: options.browserInlineFiles,
-      browserBundleFiles: options.browserBundleFiles,
       background: options.background,
       search: options.search,
       baseUrl: options.baseUrl,
@@ -489,8 +412,7 @@ async function readModernSessionMetadata(sessionId: string): Promise<SessionMeta
       return null;
     }
     const enriched = await attachModelRuns(parsed, sessionId);
-    const runtimeChecked = await markDeadBrowser(enriched, { persist: false });
-    return await markZombie(runtimeChecked, { persist: false });
+    return await markZombie(enriched, { persist: false });
   } catch {
     return null;
   }
@@ -501,8 +423,7 @@ async function readLegacySessionMetadata(sessionId: string): Promise<SessionMeta
     const raw = await fs.readFile(legacySessionPath(sessionId), 'utf8');
     const parsed = JSON.parse(raw) as SessionMetadata;
     const enriched = await attachModelRuns(parsed, sessionId);
-    const runtimeChecked = await markDeadBrowser(enriched, { persist: false });
-    return await markZombie(runtimeChecked, { persist: false });
+    return await markZombie(enriched, { persist: false });
   } catch {
     return null;
   }
@@ -543,8 +464,7 @@ export async function listSessionsMetadata(): Promise<SessionMetadata[]> {
   for (const entry of entries) {
     let meta = await readSessionMetadata(entry);
     if (meta) {
-      meta = await markDeadBrowser(meta, { persist: true });
-      meta = await markZombie(meta, { persist: true }); // keep stored metadata consistent with zombie detection
+      meta = await markZombie(meta, { persist: true });
       metas.push(meta);
     }
   }
@@ -677,7 +597,6 @@ export async function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export { MAX_STATUS_LIMIT };
 export { ZOMBIE_MAX_AGE_MS };
 
 export async function getSessionPaths(sessionId: string): Promise<{
@@ -709,67 +628,12 @@ async function markZombie(meta: SessionMetadata, { persist }: { persist: boolean
   if (!(await isZombie(meta))) {
     return meta;
   }
-  if (meta.mode === 'browser') {
-    const runtime = meta.browser?.runtime;
-    if (runtime) {
-      const signals: boolean[] = [];
-      if (runtime.chromePid) {
-        signals.push(isProcessAlive(runtime.chromePid));
-      }
-      if (runtime.chromePort) {
-        const host = runtime.chromeHost ?? '127.0.0.1';
-        signals.push(await isPortOpen(host, runtime.chromePort));
-      }
-      if (signals.some(Boolean)) {
-        return meta;
-      }
-    }
-  }
   const maxAgeMs = resolveZombieMaxAgeMs(meta);
   const updated: SessionMetadata = {
     ...meta,
     status: 'error',
     errorMessage: `Session marked as zombie (> ${formatElapsed(maxAgeMs)} stale)`,
     completedAt: new Date().toISOString(),
-  };
-  if (persist) {
-    await fs.writeFile(metaPath(meta.id), JSON.stringify(updated, null, 2), 'utf8');
-  }
-  return updated;
-}
-
-async function markDeadBrowser(meta: SessionMetadata, { persist }: { persist: boolean }): Promise<SessionMetadata> {
-  if (meta.status !== 'running' || meta.mode !== 'browser') {
-    return meta;
-  }
-  const runtime = meta.browser?.runtime;
-  if (!runtime) {
-    return meta;
-  }
-  const signals: boolean[] = [];
-  if (runtime.chromePid) {
-    signals.push(isProcessAlive(runtime.chromePid));
-  }
-  if (runtime.chromePort) {
-    const host = runtime.chromeHost ?? '127.0.0.1';
-    signals.push(await isPortOpen(host, runtime.chromePort));
-  }
-  if (signals.length === 0 || signals.some(Boolean)) {
-    return meta;
-  }
-  const response = meta.response
-    ? {
-        ...meta.response,
-        status: 'error',
-        incompleteReason: meta.response.incompleteReason ?? 'chrome-disconnected',
-      }
-    : { status: 'error', incompleteReason: 'chrome-disconnected' };
-  const updated: SessionMetadata = {
-    ...meta,
-    status: 'error',
-    errorMessage: 'Browser session ended (Chrome is no longer reachable)',
-    completedAt: new Date().toISOString(),
-    response,
   };
   if (persist) {
     await fs.writeFile(metaPath(meta.id), JSON.stringify(updated, null, 2), 'utf8');
@@ -846,47 +710,3 @@ async function getLastActivityMs(meta: SessionMetadata): Promise<number | null> 
   return sawStat ? latest : null;
 }
 
-function isProcessAlive(pid?: number): boolean {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-    if (code === 'ESRCH' || code === 'EINVAL') {
-      return false;
-    }
-    if (code === 'EPERM') {
-      return true;
-    }
-    return true;
-  }
-}
-
-async function isPortOpen(host: string, port: number): Promise<boolean> {
-  if (!port || port <= 0 || port > 65535) {
-    return false;
-  }
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host, port });
-    let settled = false;
-    const cleanup = (result: boolean) => {
-      if (settled) return;
-      settled = true;
-      socket.removeAllListeners();
-      socket.end();
-      socket.destroy();
-      socket.unref();
-      resolve(result);
-    };
-    const timer = setTimeout(() => cleanup(false), CHROME_RUNTIME_TIMEOUT_MS);
-    socket.once('connect', () => {
-      clearTimeout(timer);
-      cleanup(true);
-    });
-    socket.once('error', () => {
-      clearTimeout(timer);
-      cleanup(false);
-    });
-  });
-}

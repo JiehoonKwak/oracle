@@ -10,31 +10,11 @@ import { renderMarkdownAnsi } from './markdownRenderer.js';
 import { formatFinishLine } from '../oracle/finishLine.js';
 import { sessionStore, wait } from '../sessionStore.js';
 import { formatTokenCount, formatTokenValue } from '../oracle/runUtils.js';
-import type { BrowserLogger } from '../browser/types.js';
-import { resumeBrowserSession } from '../browser/reattach.js';
-import { estimateTokenCount } from '../browser/utils.js';
 import { formatSessionTableHeader, formatSessionTableRow, resolveSessionCost } from './sessionTable.js';
 
 const isTty = (): boolean => Boolean(process.stdout.isTTY);
 const dim = (text: string): string => (isTty() ? kleur.dim(text) : text);
-export const MAX_RENDER_BYTES = 200_000;
-
-function isProcessAlive(pid?: number): boolean {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-    if (code === 'ESRCH' || code === 'EINVAL') {
-      return false;
-    }
-    if (code === 'EPERM') {
-      return true;
-    }
-    return true;
-  }
-}
+const MAX_RENDER_BYTES = 200_000;
 
 export interface ShowStatusOptions {
   hours: number;
@@ -107,13 +87,6 @@ export async function attachSession(sessionId: string, options?: AttachSessionOp
     process.exitCode = 1;
     return;
   }
-  if (metadata.mode === 'browser' && metadata.status === 'running' && !metadata.browser?.runtime) {
-    await wait(250);
-    const refreshed = await sessionStore.readSession(sessionId);
-    if (refreshed) {
-      metadata = refreshed;
-    }
-  }
   const normalizedModelFilter = options?.model?.trim().toLowerCase();
   if (normalizedModelFilter) {
     const availableModels =
@@ -128,78 +101,6 @@ export async function attachSession(sessionId: string, options?: AttachSessionOp
   const initialStatus = metadata.status;
   const wantsRender = Boolean(options?.renderMarkdown);
   const isVerbose = Boolean(process.env.ORACLE_VERBOSE_RENDER);
-  const runtime = metadata.browser?.runtime;
-  const controllerAlive = isProcessAlive(runtime?.controllerPid);
-
-  const hasChromeDisconnect = metadata.response?.incompleteReason === 'chrome-disconnected';
-  const statusAllowsReattach = metadata.status === 'running' || (metadata.status === 'error' && hasChromeDisconnect);
-  const hasFallbackSessionInfo = Boolean(runtime?.chromePort || runtime?.tabUrl || runtime?.conversationId);
-  const canReattach =
-    statusAllowsReattach &&
-    metadata.mode === 'browser' &&
-    hasFallbackSessionInfo &&
-    (hasChromeDisconnect || (runtime?.controllerPid && !controllerAlive));
-
-  if (canReattach) {
-    const portInfo = runtime?.chromePort ? `port ${runtime.chromePort}` : 'unknown port';
-    const urlInfo = runtime?.tabUrl ? `url=${runtime.tabUrl}` : 'url=unknown';
-    console.log(chalk.yellow(`Attempting to reattach to the existing Chrome session (${portInfo}, ${urlInfo})...`));
-    try {
-      const result = await resumeBrowserSession(
-        runtime as NonNullable<typeof runtime>,
-        metadata.browser?.config,
-        Object.assign(
-          ((message?: string) => {
-            if (message) {
-              console.log(dim(message));
-            }
-          }) as unknown as BrowserLogger,
-          { verbose: true },
-        ),
-        { promptPreview: metadata.promptPreview },
-      );
-      const outputTokens = estimateTokenCount(result.answerMarkdown);
-      const logWriter = sessionStore.createLogWriter(sessionId);
-      logWriter.logLine('[reattach] captured assistant response from existing Chrome tab');
-      logWriter.logLine('Answer:');
-      logWriter.logLine(result.answerMarkdown || result.answerText);
-      logWriter.stream.end();
-      if (metadata.model) {
-        await sessionStore.updateModelRun(metadata.id, metadata.model, {
-          status: 'completed',
-          usage: {
-            inputTokens: 0,
-            outputTokens,
-            reasoningTokens: 0,
-            totalTokens: outputTokens,
-          },
-          completedAt: new Date().toISOString(),
-        });
-      }
-      await sessionStore.updateSession(sessionId, {
-        status: 'completed',
-        completedAt: new Date().toISOString(),
-        usage: {
-          inputTokens: 0,
-          outputTokens,
-          reasoningTokens: 0,
-          totalTokens: outputTokens,
-        },
-        browser: {
-          config: metadata.browser?.config,
-          runtime,
-        },
-        response: { status: 'completed' },
-        error: undefined,
-        transport: undefined,
-      });
-      console.log(chalk.green('Reattach succeeded; session marked completed.'));
-      metadata = (await sessionStore.readSession(sessionId)) ?? metadata;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.log(chalk.red(`Reattach failed: ${message}`));
-    }
-  }
   if (!options?.suppressMetadata) {
     const reattachLine = buildReattachLine(metadata);
     if (reattachLine) {
@@ -606,7 +507,7 @@ export function formatCompletionSummary(
   if (!metadata.usage || metadata.elapsedMs == null) {
     return null;
   }
-  const modeLabel = metadata.mode === 'browser' ? `${metadata.model ?? 'n/a'}[browser]` : metadata.model ?? 'n/a';
+  const modeLabel = metadata.model ?? 'n/a';
   const usage = metadata.usage;
   const cost = resolveSessionCost(metadata);
   const tokensDisplay = [
