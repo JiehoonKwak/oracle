@@ -11,6 +11,29 @@ Oracle is stateless — every run gets the full context (project briefing + file
 
 `oracle --help` for usage
 
+## Agent Usage (--json)
+
+**ALWAYS use `--json` when calling oracle programmatically.** It emits a single JSON object to stdout with zero decoration.
+
+```bash
+oracle --json -p "Review this approach" --file "src/**/*.ts"
+```
+
+Output schema:
+
+```jsonc
+// Single model
+{ "model": "gpt-5.1", "output": "response text..." }
+
+// Multi-model (--models)
+{ "responses": [{ "model": "gpt-5.1", "output": "..." }, { "model": "gemini-3-pro", "output": "..." }] }
+
+// Error
+{ "error": "error message" }
+```
+
+Parse with `JSON.parse()` — no stripping needed.
+
 ## Examples
 
 ### 1. Second Opinion
@@ -48,6 +71,7 @@ oracle -P prompt.md --file "src/**/*.ts"
 | `-m model`            | Single model override                         |
 | `--models "a,b"`      | Parallel multi-model query                    |
 | `--dry-run`           | Preview token usage without calling API       |
+| `--json`              | Structured JSON output (use for agent calls)  |
 | `--write-output path` | Save response to file                         |
 
 ## Prompt Crafting
