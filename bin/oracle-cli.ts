@@ -113,6 +113,7 @@ interface CliOptions extends OptionValues {
   retainHours?: number;
   writeOutput?: string;
   writeOutputPath?: string;
+  json?: boolean;
 }
 
 type ResolvedCliOptions = Omit<CliOptions, "model"> & {
@@ -141,6 +142,8 @@ const program = new Command();
 let introPrinted = false;
 program.hook("preAction", () => {
   if (introPrinted) return;
+  const opts = program.optsWithGlobals() as CliOptions;
+  if (opts.json) return;
   console.log(formatIntroLine(VERSION, { env: process.env, richTty: isTty }));
   introPrinted = true;
 });
@@ -353,6 +356,7 @@ program
   )
   .addOption(new Option("--wait").default(undefined))
   .addOption(new Option("--no-wait").default(undefined).hideHelp())
+  .option("--json", "Output a single JSON object (for programmatic/agent use).", false)
   .showHelpAfterError("(use --help for usage)");
 
 program.addHelpText(
@@ -539,6 +543,7 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
 
 async function runRootCommand(options: CliOptions): Promise<void> {
   const userConfig = (await loadUserConfig()).config;
+  const jsonOutput = Boolean(options.json);
   const helpRequested = rawCliArgs.some((arg: string) => arg === "--help" || arg === "-h");
   const optionUsesDefault = (name: string): boolean => {
     const source = program.getOptionValueSource?.(name);
@@ -574,7 +579,8 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     if (duplicates.length > 0) {
       const preview = duplicates.slice(0, 8).join(", ");
       const suffix = duplicates.length > 8 ? ` (+${duplicates.length - 8} more)` : "";
-      console.log(chalk.dim(`Ignoring duplicate --file inputs: ${preview}${suffix}`));
+      if (!jsonOutput)
+        console.log(chalk.dim(`Ignoring duplicate --file inputs: ${preview}${suffix}`));
     }
     options.file = deduped;
   }
@@ -606,7 +612,10 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   }
   const retentionHours = typeof options.retainHours === "number" ? options.retainHours : undefined;
   await sessionStore.ensureStorage();
-  await pruneOldSessions(retentionHours, (message) => console.log(chalk.dim(message)));
+  await pruneOldSessions(
+    retentionHours,
+    jsonOutput ? () => {} : (message) => console.log(chalk.dim(message)),
+  );
 
   if (options.debugHelp) {
     printDebugHelp(program.name());
@@ -661,13 +670,18 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   resolvedOptions.effectiveModelId = effectiveModelId;
   resolvedOptions.writeOutputPath = resolveOutputPath(options.writeOutput, process.cwd());
 
+  if (jsonOutput) options.heartbeat = 0;
+
   // Decide whether to block until completion:
   // - explicit --wait / --no-wait wins
   // - otherwise block for fast models (gpt-5.1) and detach by default for pro API runs
-  const waitPreference = resolveWaitFlag({
-    waitFlag: options.wait,
-    model: resolvedModel,
-  });
+  // - JSON mode always runs inline (no detach)
+  const waitPreference = jsonOutput
+    ? true
+    : resolveWaitFlag({
+        waitFlag: options.wait,
+        model: resolvedModel,
+      });
 
   if (await handleStatusFlag(options, { attachSession, showStatus })) {
     return;
@@ -749,7 +763,7 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     prompt: resolvedOptions.prompt,
     force: options.force,
     sessionStore,
-    log: console.log,
+    log: jsonOutput ? () => {} : console.log,
   });
   if (duplicateBlocked) {
     process.exitCode = 1;
@@ -828,6 +842,8 @@ async function runRootCommand(options: CliOptions): Promise<void> {
       notifications,
       userConfig,
       true,
+      process.cwd(),
+      jsonOutput,
     );
     return;
   }
@@ -845,10 +861,15 @@ async function runInteractiveSession(
   userConfig?: UserConfig,
   suppressSummary = false,
   cwd: string = process.cwd(),
+  jsonOutput = false,
 ): Promise<void> {
   const { logLine, writeChunk, stream } = sessionStore.createLogWriter(sessionMeta.id);
   let headerAugmented = false;
   const combinedLog = (message = ""): void => {
+    if (jsonOutput) {
+      logLine(message);
+      return;
+    }
     if (!headerAugmented && message.startsWith("oracle (")) {
       headerAugmented = true;
       if (showReattachHint) {
@@ -867,7 +888,7 @@ async function runInteractiveSession(
     return true;
   };
   try {
-    await performSessionRun({
+    const result = await performSessionRun({
       sessionMeta,
       runOptions,
       mode: "api",
@@ -878,9 +899,17 @@ async function runInteractiveSession(
       notifications:
         notifications ??
         deriveNotificationSettingsFromMetadata(sessionMeta, process.env, userConfig?.notify),
+      muteStdout: jsonOutput,
     });
+    if (jsonOutput && result) {
+      const json =
+        result.answers.length === 1
+          ? { model: result.answers[0].model, output: result.answers[0].text }
+          : { responses: result.answers.map((a) => ({ model: a.model, output: a.text })) };
+      process.stdout.write(JSON.stringify(json) + "\n");
+    }
     const latest = await sessionStore.readSession(sessionMeta.id);
-    if (!suppressSummary) {
+    if (!suppressSummary && !jsonOutput) {
       const summary = latest ? formatCompletionSummary(latest, { includeSlug: true }) : null;
       if (summary) {
         console.log("\n" + chalk.green.bold(summary));
@@ -888,6 +917,11 @@ async function runInteractiveSession(
       }
     }
   } catch (error) {
+    if (jsonOutput) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stdout.write(JSON.stringify({ error: message }) + "\n");
+      return;
+    }
     throw error;
   } finally {
     stream.end();
@@ -975,7 +1009,17 @@ function resolveWaitFlag({ waitFlag, model }: { waitFlag?: boolean; model: Model
 
 program.action(async function (this: Command) {
   const options = this.optsWithGlobals() as CliOptions;
-  await runRootCommand(options);
+  try {
+    await runRootCommand(options);
+  } catch (error) {
+    if (options.json) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stdout.write(JSON.stringify({ error: message }) + "\n");
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
 });
 
 async function main(): Promise<void> {

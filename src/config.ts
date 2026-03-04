@@ -13,7 +13,7 @@ export interface UserConfig {
   models?: string[];
   base_url?: string;
   apiBaseUrl?: string;
-  output_format?: "text" | "json";
+
   search?: "on" | "off";
   heartbeatSeconds?: number;
   filesReport?: boolean;
