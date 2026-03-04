@@ -1,6 +1,6 @@
 ---
 name: oracle
-description: Use the @steipete/oracle CLI to bundle a prompt plus the right files and get a second-model review (API or browser) for debugging, refactors, design checks, or cross-validation.
+description: Use when falling into rabbit hole, stuck/loop on a problem, user says "second opinion", "ask other AI". CLI to bundle a prompt plus the right files and get a second-model review via API.
 ---
 
 # Oracle — Second-Model Review via CLI
@@ -9,23 +9,11 @@ One-shot LLM queries with full file context. Use when you need a second opinion 
 
 Oracle is stateless — every run gets the full context (project briefing + files + question). It cannot see your project unless you pass `--file`.
 
-## When to Use
-
-- Stuck or looping on a problem → get a different model's take
-- Code review or refactor validation → multi-model cross-check
-- Architecture decision → compare reasoning across providers
-- Debugging → fresh eyes with full file context
+`oracle --help` for usage
 
 ## Examples
 
-### 1. Second opinion (single model)
-
-```bash
-oracle -p "I'm stuck on [problem]. I've tried [approach]. What am I missing?" \
-  --file src/relevant.ts --file src/related.ts
-```
-
-### 2. Multi-model cross-validation
+### 1. Second Opinion
 
 Config defaults apply automatically when no `--model`/`--models` on CLI:
 
@@ -42,7 +30,7 @@ oracle --models "google/gemini-3.1-pro-preview,x-ai/grok-4.1-fast" \
   -p "Cross-check assumptions in data layer" --file "src/**/*.ts"
 ```
 
-### 3. Complex prompt from file
+### 2. Complex prompt from file
 
 When the prompt needs structure, code blocks, or multi-line content:
 
@@ -50,23 +38,17 @@ When the prompt needs structure, code blocks, or multi-line content:
 oracle -P prompt.md --file "src/**/*.ts"
 ```
 
-### 4. Dry run (check token budget before calling API)
-
-```bash
-oracle --dry-run -p "Review auth flow" --file "src/auth/**"
-```
-
 ## Key Flags
 
-| Flag | Purpose |
-|------|---------|
-| `-p "text"` | Inline prompt |
-| `-P path` | Read prompt from file (avoids shell escaping) |
-| `-f / --file <globs>` | Files/dirs to attach (required for context) |
-| `-m model` | Single model override |
-| `--models "a,b"` | Parallel multi-model query |
-| `--dry-run` | Preview token usage without calling API |
-| `--write-output path` | Save response to file |
+| Flag                  | Purpose                                       |
+| --------------------- | --------------------------------------------- |
+| `-p "text"`           | Inline prompt                                 |
+| `-P path`             | Read prompt from file (avoids shell escaping) |
+| `-f / --file <globs>` | Files/dirs to attach (required for context)   |
+| `-m model`            | Single model override                         |
+| `--models "a,b"`      | Parallel multi-model query                    |
+| `--dry-run`           | Preview token usage without calling API       |
+| `--write-output path` | Save response to file                         |
 
 ## Prompt Crafting
 
