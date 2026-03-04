@@ -1,89 +1,58 @@
-import OpenAI, { AzureOpenAI } from 'openai';
+import OpenAI from "openai";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionCreateParamsNonStreaming,
-} from 'openai/resources/chat/completions';
-import path from 'node:path';
-import { createRequire } from 'node:module';
+} from "openai/resources/chat/completions";
+import path from "node:path";
+import { createRequire } from "node:module";
 import type {
-  AzureOptions,
   ClientFactory,
   ClientLike,
   OracleRequestBody,
   OracleResponse,
   ResponseStreamLike,
   ModelName,
-} from './types.js';
-import { createGeminiClient } from './gemini.js';
-import { createClaudeClient } from './claude.js';
-import { isOpenRouterBaseUrl } from './modelResolver.js';
-import { resolveProvider } from './providerResolver.js';
+} from "./types.js";
+import { createGeminiClient } from "./gemini.js";
+import { isOpenRouterBaseUrl } from "./modelResolver.js";
+import { resolveProvider } from "./providerResolver.js";
 
 export function createDefaultClientFactory(): ClientFactory {
   const customFactory = loadCustomClientFactory();
   if (customFactory) return customFactory;
   return (
     key: string,
-    options?: { baseUrl?: string; azure?: AzureOptions; model?: ModelName; resolvedModelId?: string; httpTimeoutMs?: number },
+    options?: {
+      baseUrl?: string;
+      model?: ModelName;
+      resolvedModelId?: string;
+      httpTimeoutMs?: number;
+    },
   ): ClientLike => {
-    if (options?.baseUrl) {
-      const modelProvider = options.model ? resolveProvider(options.model) : 'other';
-      // Route known providers to their dedicated clients even when baseUrl is set
-      // (e.g. Claude with ANTHROPIC_BASE_URL). Only bypass for OpenRouter or unknown providers.
-      if (modelProvider === 'google' && !isOpenRouterBaseUrl(options.baseUrl)) {
-        return createGeminiClient(key, options.model!, options.resolvedModelId);
-      }
-      if (modelProvider === 'anthropic' && !isOpenRouterBaseUrl(options.baseUrl)) {
-        return createClaudeClient(key, options.model!, options.resolvedModelId, options.baseUrl);
-      }
-      const openRouter = isOpenRouterBaseUrl(options.baseUrl);
-      const defaultHeaders = openRouter ? buildOpenRouterHeaders() : undefined;
-      const httpTimeoutMs = typeof options.httpTimeoutMs === 'number' && Number.isFinite(options.httpTimeoutMs) && options.httpTimeoutMs > 0
-        ? options.httpTimeoutMs : 20 * 60 * 1000;
-      const instance = new OpenAI({ apiKey: key, timeout: httpTimeoutMs, baseURL: options.baseUrl, defaultHeaders });
-      if (openRouter) return buildOpenRouterCompletionClient(instance);
-      return {
-        responses: {
-          stream: (body) => instance.responses.stream(body) as unknown as Promise<ResponseStreamLike>,
-          create: (body) => instance.responses.create(body) as unknown as Promise<OracleResponse>,
-          retrieve: (id) => instance.responses.retrieve(id) as unknown as Promise<OracleResponse>,
-        },
-      };
-    }
-    if (options?.model && resolveProvider(options.model) === 'google') {
-      // Gemini client uses its own SDK; allow passing the already-resolved id for transparency/logging.
-      return createGeminiClient(key, options.model, options.resolvedModelId);
-    }
-    if (options?.model && resolveProvider(options.model) === 'anthropic') {
-      return createClaudeClient(key, options.model, options.resolvedModelId, options.baseUrl);
+    const modelProvider = options?.model ? resolveProvider(options.model) : "other";
+
+    // Gemini always routes to its own SDK (unless going through OpenRouter)
+    if (modelProvider === "google" && !isOpenRouterBaseUrl(options?.baseUrl)) {
+      return createGeminiClient(key, options!.model!, options?.resolvedModelId);
     }
 
-    let instance: OpenAI;
     const openRouter = isOpenRouterBaseUrl(options?.baseUrl);
-    const defaultHeaders: Record<string, string> | undefined = openRouter ? buildOpenRouterHeaders() : undefined;
-
+    const defaultHeaders = openRouter ? buildOpenRouterHeaders() : undefined;
     const httpTimeoutMs =
-      typeof options?.httpTimeoutMs === 'number' && Number.isFinite(options.httpTimeoutMs) && options.httpTimeoutMs > 0
+      typeof options?.httpTimeoutMs === "number" &&
+      Number.isFinite(options.httpTimeoutMs) &&
+      options.httpTimeoutMs > 0
         ? options.httpTimeoutMs
         : 20 * 60 * 1000;
-    if (options?.azure?.endpoint) {
-      instance = new AzureOpenAI({
-        apiKey: key,
-        endpoint: options.azure.endpoint,
-        apiVersion: options.azure.apiVersion,
-        deployment: options.azure.deployment,
-        timeout: httpTimeoutMs,
-      });
-    } else {
-      instance = new OpenAI({
-        apiKey: key,
-        timeout: httpTimeoutMs,
-        baseURL: options?.baseUrl,
-        defaultHeaders,
-      });
-    }
+
+    const instance = new OpenAI({
+      apiKey: key,
+      timeout: httpTimeoutMs,
+      baseURL: options?.baseUrl,
+      defaultHeaders,
+    });
 
     if (openRouter) {
       return buildOpenRouterCompletionClient(instance);
@@ -95,7 +64,8 @@ export function createDefaultClientFactory(): ClientFactory {
           instance.responses.stream(body) as unknown as Promise<ResponseStreamLike>,
         create: (body: OracleRequestBody) =>
           instance.responses.create(body) as unknown as Promise<OracleResponse>,
-        retrieve: (id: string) => instance.responses.retrieve(id) as unknown as Promise<OracleResponse>,
+        retrieve: (id: string) =>
+          instance.responses.retrieve(id) as unknown as Promise<OracleResponse>,
       },
     };
   };
@@ -103,13 +73,16 @@ export function createDefaultClientFactory(): ClientFactory {
 
 function buildOpenRouterHeaders(): Record<string, string> | undefined {
   const headers: Record<string, string> = {};
-  const referer = process.env.OPENROUTER_REFERER ?? process.env.OPENROUTER_HTTP_REFERER ?? 'https://github.com/steipete/oracle';
-  const title = process.env.OPENROUTER_TITLE ?? 'Oracle CLI';
+  const referer =
+    process.env.OPENROUTER_REFERER ??
+    process.env.OPENROUTER_HTTP_REFERER ??
+    "https://github.com/steipete/oracle";
+  const title = process.env.OPENROUTER_TITLE ?? "Oracle CLI";
   if (referer) {
-    headers['HTTP-Referer'] = referer;
+    headers["HTTP-Referer"] = referer;
   }
   if (title) {
-    headers['X-Title'] = title;
+    headers["X-Title"] = title;
   }
   return headers;
 }
@@ -120,36 +93,36 @@ function loadCustomClientFactory(): ClientFactory | null {
     return null;
   }
 
-  if (override === 'INLINE_TEST_FACTORY') {
+  if (override === "INLINE_TEST_FACTORY") {
     return () =>
       ({
         responses: {
-          create: async () => ({ id: 'inline-test', status: 'completed' }),
+          create: async () => ({ id: "inline-test", status: "completed" }),
           stream: async () => ({
             [Symbol.asyncIterator]: () => ({
               async next() {
                 return { done: true, value: undefined };
               },
             }),
-            finalResponse: async () => ({ id: 'inline-test', status: 'completed' }),
+            finalResponse: async () => ({ id: "inline-test", status: "completed" }),
           }),
-          retrieve: async (id: string) => ({ id, status: 'completed' }),
+          retrieve: async (id: string) => ({ id, status: "completed" }),
         },
-      } as unknown as ClientLike);
+      }) as unknown as ClientLike;
   }
   try {
     const require = createRequire(import.meta.url);
     const resolved = path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
     const moduleExports = require(resolved);
     const factory =
-      typeof moduleExports === 'function'
+      typeof moduleExports === "function"
         ? moduleExports
-        : typeof moduleExports?.default === 'function'
+        : typeof moduleExports?.default === "function"
           ? moduleExports.default
-          : typeof moduleExports?.createClientFactory === 'function'
+          : typeof moduleExports?.createClientFactory === "function"
             ? moduleExports.createClientFactory
             : null;
-    if (typeof factory === 'function') {
+    if (typeof factory === "function") {
       return factory as ClientFactory;
     }
     console.warn(`Custom client factory at ${resolved} did not export a function.`);
@@ -161,16 +134,19 @@ function loadCustomClientFactory(): ClientFactory | null {
 
 function buildOpenRouterCompletionClient(instance: OpenAI): ClientLike {
   const adaptRequest = (body: OracleRequestBody) => {
-    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [];
     if (body.instructions) {
-      messages.push({ role: 'system', content: body.instructions });
+      messages.push({ role: "system", content: body.instructions });
     }
     for (const entry of body.input) {
       const textParts = entry.content
-        .map((c) => (c.type === 'input_text' ? c.text : ''))
+        .map((c) => (c.type === "input_text" ? c.text : ""))
         .filter((t) => t)
-        .join('\n\n');
-      messages.push({ role: (entry.role as 'user' | 'assistant' | 'system') ?? 'user', content: textParts });
+        .join("\n\n");
+      messages.push({
+        role: (entry.role as "user" | "assistant" | "system") ?? "user",
+        content: textParts,
+      });
     }
     const base = {
       model: body.model,
@@ -183,7 +159,7 @@ function buildOpenRouterCompletionClient(instance: OpenAI): ClientLike {
   };
 
   const adaptResponse = (response: ChatCompletion): OracleResponse => {
-    const text = response.choices?.[0]?.message?.content ?? '';
+    const text = response.choices?.[0]?.message?.content ?? "";
     const usage = {
       input_tokens: response.usage?.prompt_tokens ?? 0,
       output_tokens: response.usage?.completion_tokens ?? 0,
@@ -191,27 +167,27 @@ function buildOpenRouterCompletionClient(instance: OpenAI): ClientLike {
     };
     return {
       id: response.id ?? `openrouter-${Date.now()}`,
-      status: 'completed',
+      status: "completed",
       output_text: [text],
-      output: [{ type: 'text', text }],
+      output: [{ type: "text", text }],
       usage,
     };
   };
 
   const stream = async (body: OracleRequestBody): Promise<ResponseStreamLike> => {
     const { streaming } = adaptRequest(body);
-    let finalUsage: ChatCompletion['usage'] | undefined;
+    let finalUsage: ChatCompletion["usage"] | undefined;
     let finalId: string | undefined;
-    let aggregated = '';
+    let aggregated = "";
 
     async function* iterator() {
       const completion = await instance.chat.completions.create(streaming);
       for await (const chunk of completion as AsyncIterable<ChatCompletionChunk>) {
         finalId = chunk.id ?? finalId;
-        const delta = chunk.choices?.[0]?.delta?.content ?? '';
+        const delta = chunk.choices?.[0]?.delta?.content ?? "";
         if (delta) {
           aggregated += delta;
-          yield { type: 'chunk', delta };
+          yield { type: "chunk", delta };
         }
         if (chunk.usage) {
           finalUsage = chunk.usage;
@@ -228,11 +204,11 @@ function buildOpenRouterCompletionClient(instance: OpenAI): ClientLike {
       async finalResponse(): Promise<OracleResponse> {
         return adaptResponse({
           id: finalId ?? `openrouter-${Date.now()}`,
-          choices: [{ message: { role: 'assistant', content: aggregated } }],
+          choices: [{ message: { role: "assistant", content: aggregated } }],
           usage: finalUsage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           created: Math.floor(Date.now() / 1000),
-          model: '',
-          object: 'chat.completion',
+          model: "",
+          object: "chat.completion",
         } as ChatCompletion);
       },
     };
@@ -249,7 +225,7 @@ function buildOpenRouterCompletionClient(instance: OpenAI): ClientLike {
       stream,
       create,
       retrieve: async () => {
-        throw new Error('retrieve is not supported for OpenRouter chat/completions fallback.');
+        throw new Error("retrieve is not supported for OpenRouter chat/completions fallback.");
       },
     },
   };

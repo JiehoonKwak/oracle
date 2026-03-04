@@ -6,12 +6,12 @@ import { DEFAULT_MODEL, MODEL_CONFIGS } from "../src/oracle/config.js";
 describe("resolveRunOptionsFromConfig", () => {
   const basePrompt = "This prompt is comfortably above twenty characters.";
 
-  it("always resolves engine to api", () => {
-    const { resolvedEngine } = resolveRunOptionsFromConfig({
+  it("returns runOptions", () => {
+    const { runOptions } = resolveRunOptionsFromConfig({
       prompt: basePrompt,
       env: {},
     });
-    expect(resolvedEngine).toBe("api");
+    expect(runOptions).toBeDefined();
   });
 
   it("defaults to gpt-5.2-pro when model not provided", () => {
@@ -24,7 +24,6 @@ describe("resolveRunOptionsFromConfig", () => {
   it("uses config models[0] when caller does not provide one", () => {
     const { runOptions } = resolveRunOptionsFromConfig({
       prompt: basePrompt,
-      engine: "api",
       userConfig: { models: ["gpt-5.1"] },
     });
     expect(runOptions.model).toBe("gpt-5.1");
@@ -81,23 +80,21 @@ describe("resolveRunOptionsFromConfig", () => {
     expect(runOptions.baseUrl).toBe("https://env.example/v2");
   });
 
-  it("resolves gemini model via api engine", () => {
-    const { runOptions, resolvedEngine } = resolveRunOptionsFromConfig({
+  it("resolves gemini model", () => {
+    const { runOptions } = resolveRunOptionsFromConfig({
       prompt: basePrompt,
       model: "gemini-3-pro",
       env: {},
     });
-    expect(resolvedEngine).toBe("api");
     expect(runOptions.model).toBe("gemini-3-pro");
   });
 
-  it("resolves gpt-5.1-codex via api engine", () => {
-    const { resolvedEngine, runOptions } = resolveRunOptionsFromConfig({
+  it("resolves gpt-5.1-codex", () => {
+    const { runOptions } = resolveRunOptionsFromConfig({
       prompt: basePrompt,
       model: "gpt-5.1-codex",
       env: {},
     });
-    expect(resolvedEngine).toBe("api");
     expect(runOptions.model).toBe("gpt-5.1-codex");
   });
 
@@ -111,16 +108,15 @@ describe("resolveRunOptionsFromConfig", () => {
     expect(runOptions.models).toEqual(["gpt-5.1", "gemini-3-pro", "claude-4.5-sonnet"]);
   });
 
-  it("resolves grok via api engine and applies XAI base url", () => {
+  it("resolves grok and applies XAI base url", () => {
     // biome-ignore lint/style/useNamingConvention: env var is uppercase by convention
     const env: NodeJS.ProcessEnv = { XAI_BASE_URL: "https://api.example/v1" } as NodeJS.ProcessEnv;
-    const { runOptions, resolvedEngine } = resolveRunOptionsFromConfig({
+    const { runOptions } = resolveRunOptionsFromConfig({
       prompt: basePrompt,
       model: "grok",
       env,
     });
     expect(runOptions.model).toBe("grok-4.1");
-    expect(resolvedEngine).toBe("api");
     expect(runOptions.baseUrl).toBe("https://api.example/v1");
   });
 });

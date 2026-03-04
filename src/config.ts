@@ -9,12 +9,6 @@ export interface NotifyConfig {
   muteIn?: Array<"CI" | "SSH">;
 }
 
-export interface AzureConfig {
-  endpoint?: string;
-  deployment?: string;
-  apiVersion?: string;
-}
-
 export interface UserConfig {
   models?: string[];
   base_url?: string;
@@ -25,7 +19,6 @@ export interface UserConfig {
   filesReport?: boolean;
   background?: boolean;
   promptSuffix?: string;
-  azure?: AzureConfig;
   sessionRetentionHours?: number;
   notify?: NotifyConfig;
 }

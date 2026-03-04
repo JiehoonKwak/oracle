@@ -1,4 +1,4 @@
-import { render as renderMarkdown } from 'markdansi';
+import { render as renderMarkdown } from "markdansi";
 
 export function renderMarkdownAnsi(markdown: string): string {
   try {
@@ -15,6 +15,3 @@ export function renderMarkdownAnsi(markdown: string): string {
     return markdown;
   }
 }
-
-/** @deprecated No longer needed — kept for backward compatibility. */
-export async function ensureShikiReady(): Promise<void> {}

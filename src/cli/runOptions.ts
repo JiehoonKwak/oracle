@@ -1,27 +1,21 @@
 import type { RunOracleOptions, ModelName } from "../oracle.js";
-import { DEFAULT_MODEL, MODEL_CONFIGS } from "../oracle.js";
+import { DEFAULT_MODEL } from "../oracle.js";
 import type { UserConfig } from "../config.js";
 import { normalizeModelOption, resolveApiModel, normalizeBaseUrl } from "./options.js";
-import { resolveGeminiModelId } from "../oracle/gemini.js";
-import { PromptValidationError } from "../oracle/errors.js";
 import { resolveProvider } from "../oracle/providerResolver.js";
-
-export type EngineMode = "api";
+import { resolveEffectiveModelId } from "../oracle/effectiveModelId.js";
 
 export interface ResolveRunOptionsInput {
   prompt: string;
   files?: string[];
   model?: string;
   models?: string[];
-  engine?: EngineMode;
   userConfig?: UserConfig;
   env?: NodeJS.ProcessEnv;
 }
 
 export interface ResolvedRunOptions {
   runOptions: RunOracleOptions;
-  resolvedEngine: EngineMode;
-  engineCoercedToApi?: boolean;
 }
 
 export function resolveRunOptionsFromConfig({
@@ -32,7 +26,6 @@ export function resolveRunOptionsFromConfig({
   userConfig,
   env = process.env,
 }: ResolveRunOptionsInput): ResolvedRunOptions {
-  const resolvedEngine: EngineMode = "api";
   const requestedModelList = Array.isArray(models) ? models : [];
   const normalizedRequestedModels = requestedModelList
     .map((entry) => normalizeModelOption(entry))
@@ -40,17 +33,13 @@ export function resolveRunOptionsFromConfig({
 
   const configDefaultModel = userConfig?.models?.[0];
   const cliModelArg = normalizeModelOption(model ?? configDefaultModel) || DEFAULT_MODEL;
-  const inferredModel = resolveApiModel(cliModelArg);
-  const resolvedModel = inferredModel;
-  const isClaude = resolveProvider(resolvedModel) === "anthropic";
+  const resolvedModel = resolveApiModel(cliModelArg);
   const isGrok = resolveProvider(resolvedModel) === "xai";
 
   const allModels: ModelName[] =
     normalizedRequestedModels.length > 0
       ? Array.from(new Set(normalizedRequestedModels.map((entry) => resolveApiModel(entry))))
       : [resolvedModel];
-
-  const fixedEngine: EngineMode = "api";
 
   const promptWithSuffix =
     userConfig?.promptSuffix && userConfig.promptSuffix.trim().length > 0
@@ -63,8 +52,7 @@ export function resolveRunOptionsFromConfig({
     userConfig?.heartbeatSeconds !== undefined ? userConfig.heartbeatSeconds * 1000 : 30_000;
 
   const baseUrl = normalizeBaseUrl(
-    userConfig?.apiBaseUrl ??
-      (isClaude ? env.ANTHROPIC_BASE_URL : isGrok ? env.XAI_BASE_URL : env.OPENAI_BASE_URL),
+    userConfig?.apiBaseUrl ?? (isGrok ? env.XAI_BASE_URL : env.OPENAI_BASE_URL),
   );
   const uniqueMultiModels: ModelName[] = normalizedRequestedModels.length > 0 ? allModels : [];
 
@@ -84,21 +72,5 @@ export function resolveRunOptionsFromConfig({
     effectiveModelId,
   };
 
-  return { runOptions, resolvedEngine: fixedEngine };
-}
-
-function resolveEngineWithConfig(_args: {
-  engine?: EngineMode;
-  configEngine?: EngineMode;
-  env: NodeJS.ProcessEnv;
-}): EngineMode {
-  return "api";
-}
-
-function resolveEffectiveModelId(model: ModelName): string {
-  if (typeof model === "string" && resolveProvider(model) === "google") {
-    return resolveGeminiModelId(model);
-  }
-  const config = MODEL_CONFIGS[model as keyof typeof MODEL_CONFIGS];
-  return config?.apiModel ?? model;
+  return { runOptions };
 }

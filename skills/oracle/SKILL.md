@@ -1,6 +1,6 @@
 ---
 name: oracle
-description: Use when falling into rabbit hole, stuck/loop on a problem, user says "second opinion", "ask other AI". CLI to bundle a prompt plus the right files and get a second-model review via API.
+description: "USE WHEN stuck in a loop, need a second opinion, user says 'ask another model', 'cross-check', 'second opinion', 'other AI'. One-shot multi-model LLM review. NOT for web search (use better-search) or deep research (use deep-research)."
 ---
 
 # Oracle — Second-Model Review via CLI

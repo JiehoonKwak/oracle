@@ -83,7 +83,7 @@ function renderHelpFooter(program: Command, colors: HelpColors): string {
     `${colors.bullet(bullet)} Duplicate prompt guard: same prompt already running ${arrow} blocked unless you pass ${colors.accent("--force")}.`,
     `${colors.bullet(bullet)} Hidden flags: run ${colors.accent(`${program.name()} --help --verbose`)} to list search/token overrides.`,
     `${colors.bullet(bullet)} Use ${colors.accent("-P/--prompt-file")} for complex prompts to avoid shell escaping.`,
-    `${colors.bullet(bullet)} Native API keys (GEMINI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY) used when available; OPENROUTER_API_KEY as fallback.`,
+    `${colors.bullet(bullet)} Native API keys (GEMINI_API_KEY, XAI_API_KEY) used when available; OPENROUTER_API_KEY as primary fallback.`,
   ].join("\n");
 
   const formatExample = (command: string, description: string): string =>

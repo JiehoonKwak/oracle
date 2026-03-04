@@ -48,7 +48,7 @@ import { formatIntroLine } from "../src/cli/tagline.js";
 import { warnIfOversizeBundle } from "../src/cli/bundleWarnings.js";
 import { formatRenderedMarkdown } from "../src/cli/renderOutput.js";
 import { resolveRenderFlag, resolveRenderPlain } from "../src/cli/renderFlags.js";
-import { resolveGeminiModelId } from "../src/oracle/gemini.js";
+import { resolveEffectiveModelId } from "../src/oracle/effectiveModelId.js";
 import {
   handleSessionCommand,
   type StatusOptions,
@@ -109,9 +109,6 @@ interface CliOptions extends OptionValues {
   // tri-state: `true` (forced wait), `false` (forced detach), `undefined` (auto)
   wait?: boolean;
   baseUrl?: string;
-  azureEndpoint?: string;
-  azureDeployment?: string;
-  azureApiVersion?: string;
   showModelId?: boolean;
   retainHours?: number;
   writeOutput?: string;
@@ -124,8 +121,6 @@ type ResolvedCliOptions = Omit<CliOptions, "model"> & {
   effectiveModelId?: string;
   writeOutputPath?: string;
 };
-
-type EngineMode = "api";
 
 const VERSION = getCliVersion();
 const CLI_ENTRYPOINT = fileURLToPath(import.meta.url);
@@ -340,12 +335,6 @@ program
     "Override the OpenAI-compatible base URL for API runs (e.g. LiteLLM proxy endpoint).",
   )
   .option(
-    "--azure-endpoint <url>",
-    "Azure OpenAI Endpoint (e.g. https://resource.openai.azure.com/).",
-  )
-  .option("--azure-deployment <name>", "Azure OpenAI Deployment Name.")
-  .option("--azure-api-version <version>", "Azure OpenAI API Version.")
-  .option(
     "--retain-hours <hours>",
     "Prune stored sessions older than this many hours before running (set 0 to disable).",
     parseFloatOption,
@@ -477,14 +466,6 @@ function buildRunOptions(
     throw new Error("Prompt is required.");
   }
   const normalizedBaseUrl = normalizeBaseUrl(overrides.baseUrl ?? options.baseUrl);
-  const azure =
-    options.azureEndpoint || overrides.azure?.endpoint
-      ? {
-          endpoint: overrides.azure?.endpoint ?? options.azureEndpoint,
-          deployment: overrides.azure?.deployment ?? options.azureDeployment,
-          apiVersion: overrides.azure?.apiVersion ?? options.azureApiVersion,
-        }
-      : undefined;
 
   return {
     prompt: options.prompt,
@@ -507,7 +488,6 @@ function buildRunOptions(
     previewMode: overrides.previewMode ?? options.previewMode,
     apiKey: overrides.apiKey ?? options.apiKey,
     baseUrl: normalizedBaseUrl,
-    azure,
     sessionId: overrides.sessionId ?? options.sessionId,
     verbose: overrides.verbose ?? options.verbose,
     heartbeatIntervalMs:
@@ -544,7 +524,6 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
     previewMode: undefined,
     apiKey: undefined,
     baseUrl: normalizeBaseUrl(stored.baseUrl),
-    azure: stored.azure,
     timeoutSeconds: stored.timeoutSeconds,
     httpTimeoutMs: stored.httpTimeoutMs,
     zombieTimeoutMs: stored.zombieTimeoutMs,
@@ -637,7 +616,7 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     throw new Error("--dry-run cannot be combined with --render-markdown.");
   }
 
-  const engine: EngineMode = "api";
+  const engine = "api" as const;
   if (optionUsesDefault("search") && userConfig.search) {
     options.search = userConfig.search === "on";
   }
@@ -651,27 +630,6 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     options.baseUrl = userConfig.apiBaseUrl;
   }
 
-  if (optionUsesDefault("azureEndpoint")) {
-    if (process.env.AZURE_OPENAI_ENDPOINT) {
-      options.azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    } else if (userConfig.azure?.endpoint) {
-      options.azureEndpoint = userConfig.azure.endpoint;
-    }
-  }
-  if (optionUsesDefault("azureDeployment")) {
-    if (process.env.AZURE_OPENAI_DEPLOYMENT) {
-      options.azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-    } else if (userConfig.azure?.deployment) {
-      options.azureDeployment = userConfig.azure.deployment;
-    }
-  }
-  if (optionUsesDefault("azureApiVersion")) {
-    if (process.env.AZURE_OPENAI_API_VERSION) {
-      options.azureApiVersion = process.env.AZURE_OPENAI_API_VERSION;
-    } else if (userConfig.azure?.apiVersion) {
-      options.azureApiVersion = userConfig.azure.apiVersion;
-    }
-  }
   // Priority: CLI --models > CLI --model > config.models > DEFAULT_MODEL
   const cliModelsExplicit = !optionUsesDefault("models");
   const cliModelExplicit = !optionUsesDefault("model");
@@ -691,18 +649,9 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   const resolvedModelCandidate: ModelName = multiModelProvided
     ? normalizedMultiModels[0]
     : resolveApiModel(cliModelArg || DEFAULT_MODEL);
-  const primaryModelCandidate = normalizedMultiModels[0] ?? resolvedModelCandidate;
-  const isClaude = primaryModelCandidate.startsWith("claude");
-
   const resolvedModel: ModelName = normalizedMultiModels[0] ?? resolvedModelCandidate;
-  const effectiveModelId = resolvedModel.startsWith("gemini")
-    ? resolveGeminiModelId(resolvedModel)
-    : isKnownModel(resolvedModel)
-      ? (MODEL_CONFIGS[resolvedModel].apiModel ?? resolvedModel)
-      : resolvedModel;
-  const resolvedBaseUrl = normalizeBaseUrl(
-    options.baseUrl ?? (isClaude ? process.env.ANTHROPIC_BASE_URL : process.env.OPENAI_BASE_URL),
-  );
+  const effectiveModelId = resolveEffectiveModelId(resolvedModel);
+  const resolvedBaseUrl = normalizeBaseUrl(options.baseUrl ?? process.env.OPENAI_BASE_URL);
   const { models: _rawModels, ...optionsWithoutModels } = options;
   const resolvedOptions: ResolvedCliOptions = { ...optionsWithoutModels, model: resolvedModel };
   if (normalizedMultiModels.length > 0) {
@@ -1022,14 +971,6 @@ function resolveWaitFlag({ waitFlag, model }: { waitFlag?: boolean; model: Model
   if (waitFlag === false) return false;
   // Pro models default to detached (false), others wait inline (true)
   return !isProModel(model);
-}
-
-function resolveEffectiveModelIdForRun(model: ModelName, stored?: string): string {
-  if (stored) return stored;
-  if (model.startsWith("gemini")) {
-    return resolveGeminiModelId(model);
-  }
-  return isKnownModel(model) ? (MODEL_CONFIGS[model].apiModel ?? model) : model;
 }
 
 program.action(async function (this: Command) {
