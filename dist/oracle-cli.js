@@ -5998,19 +5998,12 @@ import fs8 from "node:fs/promises";
 import path13 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var __dirname = path13.dirname(fileURLToPath2(import.meta.url));
-function parseModelsFile(raw) {
-  return raw.split("\n").map((l) => l.replace(/#.*$/, "").trim()).filter(Boolean);
-}
 async function loadDefaultModels(env = process.env) {
   if (env.ORACLE_MODEL) return [env.ORACLE_MODEL];
-  if (env.ORACLE_MODELS_FILE) {
-    try {
-      return parseModelsFile(await fs8.readFile(env.ORACLE_MODELS_FILE, "utf8"));
-    } catch {
-    }
-  }
+  const modelsPath = path13.resolve(__dirname, "../MODELS.md");
   try {
-    return parseModelsFile(await fs8.readFile(path13.resolve(__dirname, "../MODELS.md"), "utf8"));
+    const raw = await fs8.readFile(modelsPath, "utf8");
+    return raw.split("\n").map((l) => l.replace(/#.*$/, "").trim()).filter(Boolean);
   } catch {
     return [];
   }
