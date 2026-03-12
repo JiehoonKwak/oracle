@@ -17,7 +17,6 @@
     "probe-cookies.tsx"
   ],
   "ignoreDependencies": [
-    "toasted-notifier",
     "@cdktf/node-pty-prebuilt-multiarch",
     "@homebridge/node-pty-prebuilt-multiarch"
   ]

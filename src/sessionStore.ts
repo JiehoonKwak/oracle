@@ -1,4 +1,4 @@
-import type { SessionMetadata, SessionNotifications, StoredRunOptions, SessionModelRun } from './sessionManager.js';
+import type { SessionMetadata, StoredRunOptions, SessionModelRun } from './sessionManager.js';
 import {
   ensureSessionStorage,
   initializeSession,
@@ -22,7 +22,6 @@ export interface SessionStore {
   createSession(
     options: InitializeSessionOptionsType,
     cwd: string,
-    notifications?: SessionNotifications,
     baseSlugOverride?: string,
   ): Promise<SessionMetadata>;
   readSession(sessionId: string): Promise<SessionMetadata | null>;
@@ -50,10 +49,9 @@ class FileSessionStore implements SessionStore {
   createSession(
     options: InitializeSessionOptionsType,
     cwd: string,
-    notifications?: SessionNotifications,
     baseSlugOverride?: string,
   ): Promise<SessionMetadata> {
-    return initializeSession(options, cwd, notifications, baseSlugOverride);
+    return initializeSession(options, cwd, baseSlugOverride);
   }
 
   readSession(sessionId: string): Promise<SessionMetadata | null> {

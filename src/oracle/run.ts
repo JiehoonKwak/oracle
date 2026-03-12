@@ -83,39 +83,67 @@ export async function runOracle(
     ? (stdoutWriteDep ?? process.stdout.write.bind(process.stdout))
     : () => true;
   const isTty = allowStdout && isStdoutTty;
-  const resolvedXaiBaseUrl = process.env.XAI_BASE_URL?.trim() || "https://api.x.ai/v1";
-  const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
-  const defaultOpenRouterBase = defaultOpenRouterBaseUrl();
-
-  const knownModelConfig = isKnownModel(options.model) ? MODEL_CONFIGS[options.model] : undefined;
-  const provider = knownModelConfig?.provider ?? "other";
-
-  const hasOpenAIKey = Boolean(optionsApiKey) || Boolean(process.env.OPENAI_API_KEY);
-  const hasGeminiKey = Boolean(optionsApiKey) || Boolean(process.env.GEMINI_API_KEY);
-  const hasXaiKey = Boolean(optionsApiKey) || Boolean(process.env.XAI_API_KEY);
-
-  let baseUrl = options.baseUrl?.trim();
-  if (!baseUrl) {
-    if (resolveProvider(options.model) === "xai") {
-      baseUrl = resolvedXaiBaseUrl;
-    } else {
-      baseUrl = process.env.OPENAI_BASE_URL?.trim();
+  // ── Per-model routing ──
+  function resolveRouting(model: string, explicitBaseUrl?: string, env = process.env) {
+    if (explicitBaseUrl) {
+      const key = isOpenRouterBaseUrl(explicitBaseUrl)
+        ? env.OPENROUTER_API_KEY?.trim()
+        : env.OPENAI_API_KEY?.trim();
+      return {
+        baseUrl: explicitBaseUrl,
+        apiKey: key ?? optionsApiKey,
+        source: isOpenRouterBaseUrl(explicitBaseUrl) ? "OPENROUTER_API_KEY" : "OPENAI_API_KEY",
+      };
+    }
+    if (model.includes("/")) {
+      return {
+        baseUrl: defaultOpenRouterBaseUrl(),
+        apiKey: env.OPENROUTER_API_KEY?.trim() ?? optionsApiKey,
+        source: "OPENROUTER_API_KEY",
+      };
+    }
+    const provider = resolveProvider(model);
+    switch (provider) {
+      case "google":
+        return {
+          baseUrl: undefined,
+          apiKey: optionsApiKey ?? env.GEMINI_API_KEY?.trim(),
+          source: "GEMINI_API_KEY",
+        };
+      case "xai":
+        return {
+          baseUrl: env.XAI_BASE_URL?.trim() || "https://api.x.ai/v1",
+          apiKey: optionsApiKey ?? env.XAI_API_KEY?.trim(),
+          source: "XAI_API_KEY",
+        };
+      case "openai":
+        return {
+          baseUrl: env.OPENAI_BASE_URL?.trim(),
+          apiKey: optionsApiKey ?? env.OPENAI_API_KEY?.trim(),
+          source: "OPENAI_API_KEY",
+        };
+      case "anthropic":
+      default:
+        return {
+          baseUrl: defaultOpenRouterBaseUrl(),
+          apiKey: env.OPENROUTER_API_KEY?.trim() ?? optionsApiKey,
+          source: "OPENROUTER_API_KEY",
+        };
     }
   }
-  const providerKeyMissing =
-    (provider === "openai" && !hasOpenAIKey) ||
-    provider === "anthropic" || // no direct client; always route through OpenRouter
-    (provider === "google" && !hasGeminiKey) ||
-    (provider === "xai" && !hasXaiKey) ||
-    provider === "other";
-  const openRouterFallback = providerKeyMissing && Boolean(openRouterApiKey);
-  if (!baseUrl || openRouterFallback) {
-    if (openRouterFallback) {
-      baseUrl = defaultOpenRouterBase;
-    }
-  }
+
+  const routing = resolveRouting(options.model, options.baseUrl?.trim());
+  let baseUrl = routing.baseUrl;
+  const apiKey = routing.apiKey;
+  const envVar = routing.source;
   if (baseUrl && isOpenRouterBaseUrl(baseUrl)) {
     baseUrl = normalizeOpenRouterBaseUrl(baseUrl);
+  }
+  if (!apiKey) {
+    throw new PromptValidationError(
+      `Missing ${envVar}. Set it via the environment or a .env file.`,
+      { env: envVar },
+    );
   }
 
   const logVerbose = (message: string): void => {
@@ -126,51 +154,6 @@ export async function runOracle(
 
   const previewMode = resolvePreviewMode(options.previewMode ?? options.preview);
   const isPreview = Boolean(previewMode);
-
-  const getApiKeyForModel = (model: ModelName): { key?: string; source: string } => {
-    if (isOpenRouterBaseUrl(baseUrl) || openRouterFallback) {
-      return { key: optionsApiKey ?? openRouterApiKey, source: "OPENROUTER_API_KEY" };
-    }
-    const modelProvider = resolveProvider(model);
-    if (modelProvider === "google") {
-      return { key: optionsApiKey ?? process.env.GEMINI_API_KEY, source: "GEMINI_API_KEY" };
-    }
-    if (modelProvider === "xai") {
-      return { key: optionsApiKey ?? process.env.XAI_API_KEY, source: "XAI_API_KEY" };
-    }
-    if (modelProvider === "openai") {
-      if (optionsApiKey) return { key: optionsApiKey, source: "apiKey option" };
-      return { key: process.env.OPENAI_API_KEY, source: "OPENAI_API_KEY" };
-    }
-    return {
-      key: optionsApiKey ?? openRouterApiKey,
-      source: optionsApiKey ? "apiKey option" : "OPENROUTER_API_KEY",
-    };
-  };
-
-  const apiKeyResult = getApiKeyForModel(options.model);
-  const apiKey = apiKeyResult.key;
-  if (!apiKey) {
-    const errorModelProvider = resolveProvider(options.model);
-    const envVar =
-      isOpenRouterBaseUrl(baseUrl) || openRouterFallback
-        ? "OPENROUTER_API_KEY"
-        : errorModelProvider === "google"
-          ? "GEMINI_API_KEY"
-          : errorModelProvider === "xai"
-            ? "XAI_API_KEY"
-            : errorModelProvider === "openai"
-              ? "OPENAI_API_KEY"
-              : "OPENROUTER_API_KEY";
-    throw new PromptValidationError(
-      `Missing ${envVar}. Set it via the environment or a .env file.`,
-      {
-        env: envVar,
-      },
-    );
-  }
-
-  const envVar = apiKeyResult.source;
 
   const minPromptLength = Number.parseInt(process.env.ORACLE_MIN_PROMPT_CHARS ?? "10", 10);
   const promptLength = options.prompt?.trim().length ?? 0;
@@ -183,8 +166,9 @@ export async function runOracle(
     );
   }
 
-  const resolverOpenRouterApiKey =
-    openRouterFallback || isOpenRouterBaseUrl(baseUrl) ? (openRouterApiKey ?? apiKey) : undefined;
+  const resolverOpenRouterApiKey = isOpenRouterBaseUrl(baseUrl)
+    ? (process.env.OPENROUTER_API_KEY?.trim() ?? apiKey)
+    : undefined;
   const modelConfig = await resolveModelConfig(options.model, {
     baseUrl,
     openRouterApiKey: resolverOpenRouterApiKey,

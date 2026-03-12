@@ -59,12 +59,7 @@ import { handleSessionAlias, handleStatusFlag } from "../src/cli/rootAlias.js";
 import { resolveOutputPath } from "../src/cli/writeOutputPath.js";
 import { getCliVersion } from "../src/version.js";
 import { runDryRunSummary } from "../src/cli/dryRun.js";
-import {
-  resolveNotificationSettings,
-  deriveNotificationSettingsFromMetadata,
-  type NotificationSettings,
-} from "../src/cli/notifier.js";
-import { loadUserConfig, type UserConfig } from "../src/config.js";
+import { loadDefaultModels } from "../src/config.js";
 import { shouldBlockDuplicatePrompt } from "../src/cli/duplicatePromptGuard.js";
 
 interface CliOptions extends OptionValues {
@@ -92,8 +87,6 @@ interface CliOptions extends OptionValues {
   apiKey?: string;
   session?: string;
   execSession?: string;
-  notify?: boolean;
-  notifySound?: boolean;
   renderMarkdown?: boolean;
   sessionId?: string;
   timeout?: number | "auto";
@@ -126,8 +119,6 @@ type ResolvedCliOptions = Omit<CliOptions, "model"> & {
 const VERSION = getCliVersion();
 const CLI_ENTRYPOINT = fileURLToPath(import.meta.url);
 const LEGACY_FLAG_ALIASES = new Map<string, string>([
-  ["--[no-]notify", "--notify"],
-  ["--[no-]notify-sound", "--notify-sound"],
   ["--[no-]background", "--background"],
 ]);
 const normalizedArgv = process.argv.map((arg, index) => {
@@ -232,19 +223,6 @@ program
     false,
   )
   .option("-v, --verbose", "Enable verbose logging for all operations.", false)
-  .addOption(
-    new Option(
-      "--notify",
-      "Desktop notification when a session finishes (default on unless CI/SSH).",
-    ).default(undefined),
-  )
-  .addOption(new Option("--no-notify", "Disable desktop notifications.").default(undefined))
-  .addOption(
-    new Option("--notify-sound", "Play a notification sound on completion (default off).").default(
-      undefined,
-    ),
-  )
-  .addOption(new Option("--no-notify-sound", "Disable notification sounds.").default(undefined))
   .addOption(
     new Option(
       "--timeout <seconds|auto>",
@@ -542,7 +520,7 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
 }
 
 async function runRootCommand(options: CliOptions): Promise<void> {
-  const userConfig = (await loadUserConfig()).config;
+  const defaultModels = await loadDefaultModels();
   const jsonOutput = Boolean(options.json);
   const helpRequested = rawCliArgs.some((arg: string) => arg === "--help" || arg === "-h");
   const optionUsesDefault = (name: string): boolean => {
@@ -592,9 +570,6 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   );
 
   const applyRetentionOption = (): void => {
-    if (optionUsesDefault("retainHours") && typeof userConfig.sessionRetentionHours === "number") {
-      options.retainHours = userConfig.sessionRetentionHours;
-    }
     const envRetention = process.env.ORACLE_RETAIN_HOURS;
     if (optionUsesDefault("retainHours") && envRetention) {
       const parsed = Number.parseFloat(envRetention);
@@ -626,27 +601,15 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   }
 
   const engine = "api" as const;
-  if (optionUsesDefault("search") && userConfig.search) {
-    options.search = userConfig.search === "on";
-  }
-  if (optionUsesDefault("filesReport") && userConfig.filesReport != null) {
-    options.filesReport = Boolean(userConfig.filesReport);
-  }
-  if (optionUsesDefault("heartbeat") && typeof userConfig.heartbeatSeconds === "number") {
-    options.heartbeat = userConfig.heartbeatSeconds;
-  }
-  if (optionUsesDefault("baseUrl") && userConfig.apiBaseUrl) {
-    options.baseUrl = userConfig.apiBaseUrl;
-  }
 
-  // Priority: CLI --models > CLI --model > config.models > DEFAULT_MODEL
+  // Priority: CLI --models > CLI --model > MODELS.md defaults > DEFAULT_MODEL
   const cliModelsExplicit = !optionUsesDefault("models");
   const cliModelExplicit = !optionUsesDefault("model");
   if (cliModelsExplicit && cliModelExplicit) {
     throw new Error("--models cannot be combined with --model.");
   }
-  if (!cliModelsExplicit && !cliModelExplicit && userConfig.models?.length) {
-    options.models = userConfig.models;
+  if (!cliModelsExplicit && !cliModelExplicit && defaultModels.length > 0) {
+    options.models = defaultModels;
   }
   const multiModelProvided = Array.isArray(options.models) && options.models.length > 0;
 
@@ -729,9 +692,6 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     if (!options.prompt) {
       throw new Error("Prompt is required when using --dry-run/preview.");
     }
-    if (userConfig.promptSuffix) {
-      options.prompt = `${options.prompt.trim()}\n${userConfig.promptSuffix}`;
-    }
     resolvedOptions.prompt = options.prompt;
     const runOptions = buildRunOptions(resolvedOptions, {
       preview: true,
@@ -754,9 +714,6 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     throw new Error("Prompt is required when starting a new session.");
   }
 
-  if (userConfig.promptSuffix) {
-    options.prompt = `${options.prompt.trim()}\n${userConfig.promptSuffix}`;
-  }
   resolvedOptions.prompt = options.prompt;
 
   const duplicateBlocked = await shouldBlockDuplicatePrompt({
@@ -774,18 +731,11 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     await readFiles(options.file, { cwd: process.cwd() });
   }
 
-  const notifications = resolveNotificationSettings({
-    cliNotify: options.notify,
-    cliNotifySound: options.notifySound,
-    env: process.env,
-    config: userConfig.notify,
-  });
-
   await sessionStore.ensureStorage();
   const baseRunOptions = buildRunOptions(resolvedOptions, {
     preview: false,
     previewMode: undefined,
-    background: resolvedOptions.background ?? userConfig.background,
+    background: resolvedOptions.background,
     baseUrl: resolvedBaseUrl,
   });
   const sessionMeta = await sessionStore.createSession(
@@ -795,7 +745,6 @@ async function runRootCommand(options: CliOptions): Promise<void> {
       waitPreference,
     },
     process.cwd(),
-    notifications,
   );
   const liveRunOptions: RunOracleOptions = {
     ...baseRunOptions,
@@ -839,8 +788,6 @@ async function runRootCommand(options: CliOptions): Promise<void> {
       sessionMeta,
       liveRunOptions,
       false,
-      notifications,
-      userConfig,
       true,
       process.cwd(),
       jsonOutput,
@@ -857,8 +804,6 @@ async function runInteractiveSession(
   sessionMeta: SessionMetadata,
   runOptions: RunOracleOptions,
   showReattachHint = true,
-  notifications?: NotificationSettings,
-  userConfig?: UserConfig,
   suppressSummary = false,
   cwd: string = process.cwd(),
   jsonOutput = false,
@@ -896,9 +841,6 @@ async function runInteractiveSession(
       log: combinedLog,
       write: combinedWrite,
       version: VERSION,
-      notifications:
-        notifications ??
-        deriveNotificationSettingsFromMetadata(sessionMeta, process.env, userConfig?.notify),
       muteStdout: jsonOutput,
     });
     if (jsonOutput && result) {
@@ -957,12 +899,6 @@ async function executeSession(sessionId: string) {
   }
   const runOptions = buildRunOptionsFromMetadata(metadata);
   const { logLine, writeChunk, stream } = sessionStore.createLogWriter(sessionId);
-  const userConfig = (await loadUserConfig()).config;
-  const notifications = deriveNotificationSettingsFromMetadata(
-    metadata,
-    process.env,
-    userConfig.notify,
-  );
   try {
     await performSessionRun({
       sessionMeta: metadata,
@@ -972,7 +908,6 @@ async function executeSession(sessionId: string) {
       log: logLine,
       write: writeChunk,
       version: VERSION,
-      notifications,
     });
   } catch {
     // Errors are already logged to the session log; keep quiet to mirror stored-session behavior.

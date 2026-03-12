@@ -14,11 +14,6 @@ import {
 import { renderMarkdownAnsi } from "./markdownRenderer.js";
 import { formatResponseMetadata, formatTransportMetadata } from "./sessionDisplay.js";
 import { markErrorLogged } from "./errorUtils.js";
-import {
-  type NotificationSettings,
-  sendSessionNotification,
-  deriveNotificationSettingsFromMetadata,
-} from "./notifier.js";
 import { sessionStore } from "../sessionStore.js";
 import { runMultiModelApiSession } from "../oracle/multiModelRunner.js";
 import { MODEL_CONFIGS, DEFAULT_SYSTEM_PROMPT } from "../oracle/config.js";
@@ -80,7 +75,6 @@ interface SessionRunParams {
   log: (message?: string) => void;
   write: (chunk: string) => boolean;
   version: string;
-  notifications?: NotificationSettings;
   muteStdout?: boolean;
 }
 
@@ -91,7 +85,6 @@ export async function performSessionRun({
   log,
   write,
   version,
-  notifications,
   muteStdout = false,
 }: SessionRunParams): Promise<SessionRunResult> {
   const writeInline = (chunk: string): boolean => {
@@ -105,8 +98,6 @@ export async function performSessionRun({
     startedAt: new Date().toISOString(),
     mode,
   });
-  const notificationSettings =
-    notifications ?? deriveNotificationSettingsFromMetadata(sessionMeta, process.env);
   const modelForStatus = runOptions.model ?? sessionMeta.model;
   try {
     const multiModels = Array.isArray(runOptions.models) ? runOptions.models.filter(Boolean) : [];
@@ -294,18 +285,6 @@ export async function performSessionRun({
         (sum, entry) => sum + entry.answerText.length,
         0,
       );
-      await sendSessionNotification(
-        {
-          sessionId: sessionMeta.id,
-          sessionName: sessionMeta.options?.slug ?? sessionMeta.id,
-          mode,
-          model: `${multiModels.length} models`,
-          usage: aggregateUsage,
-          characters: totalCharacters,
-        },
-        notificationSettings,
-        log,
-      );
       if (runOptions.writeOutputPath) {
         const jsonOutput = buildMultiModelJson(
           runOptions.prompt ?? "",
@@ -375,19 +354,6 @@ export async function performSessionRun({
     }
     const answerText = extractTextOutput(result.response);
     await writeAssistantOutput(runOptions.writeOutputPath, answerText, log);
-    await sendSessionNotification(
-      {
-        sessionId: sessionMeta.id,
-        sessionName: sessionMeta.options?.slug ?? sessionMeta.id,
-        mode,
-        model: sessionMeta.model ?? runOptions.model,
-        usage: result.usage,
-        characters: answerText.length,
-      },
-      notificationSettings,
-      log,
-      answerText.slice(0, 140),
-    );
     return {
       answers: [
         {

@@ -69,7 +69,6 @@ export interface SessionMetadata {
   models?: SessionModelRun[];
   cwd?: string;
   options: StoredRunOptions;
-  notifications?: SessionNotifications;
   startedAt?: string;
   completedAt?: string;
   mode?: SessionMode;
@@ -109,11 +108,6 @@ export interface SessionModelRun {
     path: string;
     bytes?: number;
   };
-}
-
-export interface SessionNotifications {
-  enabled: boolean;
-  sound: boolean;
 }
 
 interface SessionLogWriter {
@@ -296,7 +290,6 @@ export async function updateModelRunMetadata(
 export async function initializeSession(
   options: InitializeSessionOptions,
   cwd: string,
-  notifications?: SessionNotifications,
   baseSlugOverride?: string,
 ): Promise<SessionMetadata> {
   await ensureSessionStorage();
@@ -325,7 +318,6 @@ export async function initializeSession(
     })),
     cwd,
     mode,
-    notifications,
     options: {
       prompt: options.prompt,
       file: options.file ?? [],

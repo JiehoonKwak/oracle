@@ -17,11 +17,6 @@ vi.mock('../../src/oracle/multiModelRunner.ts', () => ({
   runMultiModelApiSession: vi.fn(),
 }));
 
-vi.mock('../../src/cli/notifier.ts', () => ({
-  sendSessionNotification: vi.fn(),
-  deriveNotificationSettingsFromMetadata: vi.fn(() => ({ enabled: true, sound: false })),
-}));
-
 const sessionStoreMock = vi.hoisted(() => ({
   updateSession: vi.fn(),
   createLogWriter: vi.fn(),
@@ -51,7 +46,6 @@ import {
   type MultiModelRunSummary,
 } from '../../src/oracle/multiModelRunner.ts';
 import type { OracleResponse, RunOracleResult } from '../../src/oracle.ts';
-import { sendSessionNotification } from '../../src/cli/notifier.ts';
 import { getCliVersion } from '../../src/version.ts';
 import { deriveModelOutputPath } from '../../src/cli/sessionRunner.ts';
 
@@ -130,7 +124,6 @@ describe('performSessionRun', () => {
       'gpt-5.2-pro',
       expect.objectContaining({ status: 'completed' }),
     );
-    expect(vi.mocked(sendSessionNotification)).toHaveBeenCalled();
   });
 
   test('writes final assistant output to disk for single-model runs', async () => {

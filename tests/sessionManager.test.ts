@@ -141,7 +141,6 @@ describe('session lifecycle', () => {
     const restarted = await sessionModule.initializeSession(
       { prompt: 'Restarted', model: 'gpt-5.2-pro' },
       '/tmp/cwd',
-      undefined,
       first.id,
     );
     expect(restarted.id).toBe('alpha-beta-gamma-2');

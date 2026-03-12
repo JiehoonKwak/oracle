@@ -122,7 +122,7 @@ describe("api key logging", () => {
     );
 
     const combined = logs.join("\n");
-    expect(combined).toContain("Using apiKey option=sk-s****1234");
+    expect(combined).toContain("Using OPENAI_API_KEY=sk-s****1234");
     expect(combined).not.toContain("supersecret");
   });
 
@@ -148,7 +148,7 @@ describe("api key logging", () => {
 
     const combined = logs.join("\n");
     expect(combined).toContain(
-      "Using apiKey option=sk-s****1234 for model gpt-5.1-pro (API: gpt-5.2-pro)",
+      "Using OPENAI_API_KEY=sk-s****1234 for model gpt-5.1-pro (API: gpt-5.2-pro)",
     );
     expect(combined).not.toContain("supersecret");
   });

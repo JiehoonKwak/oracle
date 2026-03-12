@@ -14,70 +14,11 @@ describe("resolveRunOptionsFromConfig", () => {
     expect(runOptions).toBeDefined();
   });
 
-  it("defaults to gpt-5.2-pro when model not provided", () => {
+  it("defaults to DEFAULT_MODEL when model not provided", () => {
     const { runOptions } = resolveRunOptionsFromConfig({
       prompt: basePrompt,
     });
     expect(runOptions.model).toBe(DEFAULT_MODEL);
-  });
-
-  it("uses config models[0] when caller does not provide one", () => {
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: basePrompt,
-      userConfig: { models: ["gpt-5.1"] },
-    });
-    expect(runOptions.model).toBe("gpt-5.1");
-  });
-
-  it("appends prompt suffix from config", () => {
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: "Hi there, this exceeds twenty characters.",
-      userConfig: { promptSuffix: "// signed" },
-    });
-    expect(runOptions.prompt).toBe("Hi there, this exceeds twenty characters.\n// signed");
-  });
-
-  it("honors search off", () => {
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: basePrompt,
-      userConfig: { search: "off" },
-    });
-    expect(runOptions.search).toBe(false);
-  });
-
-  it("uses heartbeatSeconds from config", () => {
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: basePrompt,
-      userConfig: { heartbeatSeconds: 5 },
-    });
-    expect(runOptions.heartbeatIntervalMs).toBe(5000);
-  });
-
-  it("passes filesReport/background from config", () => {
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: basePrompt,
-      userConfig: { filesReport: true, background: false },
-    });
-    expect(runOptions.filesReport).toBe(true);
-    expect(runOptions.background).toBe(false);
-  });
-
-  it("includes apiBaseUrl from config", () => {
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: basePrompt,
-      userConfig: { apiBaseUrl: "https://proxy.test/v1" },
-    });
-    expect(runOptions.baseUrl).toBe("https://proxy.test/v1");
-  });
-
-  it("falls back to OPENAI_BASE_URL env", () => {
-    const env = {} as NodeJS.ProcessEnv;
-    env.OPENAI_BASE_URL = "https://env.example/v2";
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: basePrompt,
-      env,
-    });
-    expect(runOptions.baseUrl).toBe("https://env.example/v2");
   });
 
   it("resolves gemini model", () => {
@@ -107,18 +48,6 @@ describe("resolveRunOptionsFromConfig", () => {
     expect(runOptions.model).toBe("gpt-5.1");
     expect(runOptions.models).toEqual(["gpt-5.1", "gemini-3-pro", "claude-4.5-sonnet"]);
   });
-
-  it("resolves grok and applies XAI base url", () => {
-    // biome-ignore lint/style/useNamingConvention: env var is uppercase by convention
-    const env: NodeJS.ProcessEnv = { XAI_BASE_URL: "https://api.example/v1" } as NodeJS.ProcessEnv;
-    const { runOptions } = resolveRunOptionsFromConfig({
-      prompt: basePrompt,
-      model: "grok",
-      env,
-    });
-    expect(runOptions.model).toBe("grok-4.1");
-    expect(runOptions.baseUrl).toBe("https://api.example/v1");
-  });
 });
 
 describe("estimateRequestTokens", () => {
@@ -144,7 +73,6 @@ describe("estimateRequestTokens", () => {
       modelConfig,
       10,
     );
-    // Rough sanity: base tokenizer on text parts should be > 0; buffer ensures > base.
     expect(estimate).toBeGreaterThan(10);
   });
 
