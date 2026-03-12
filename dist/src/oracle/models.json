@@ -1,0 +1,141 @@
+{
+    "gpt-5.1-pro": {
+        "apiModel": "gpt-5.2-pro",
+        "provider": "openai",
+        "tokenizer": "gpt5pro",
+        "inputLimit": 196000,
+        "pricing": {
+            "input": 21,
+            "output": 168
+        },
+        "pro": true,
+        "reasoning": null
+    },
+    "gpt-5-pro": {
+        "provider": "openai",
+        "tokenizer": "gpt5pro",
+        "inputLimit": 196000,
+        "pricing": {
+            "input": 15,
+            "output": 120
+        },
+        "pro": true,
+        "reasoning": null
+    },
+    "gpt-5.1": {
+        "provider": "openai",
+        "tokenizer": "gpt5",
+        "inputLimit": 196000,
+        "pricing": {
+            "input": 1.25,
+            "output": 10
+        },
+        "reasoning": {
+            "effort": "high"
+        }
+    },
+    "gpt-5.1-codex": {
+        "provider": "openai",
+        "tokenizer": "gpt5",
+        "inputLimit": 196000,
+        "pricing": {
+            "input": 1.25,
+            "output": 10
+        },
+        "reasoning": {
+            "effort": "high"
+        }
+    },
+    "gpt-5.2": {
+        "provider": "openai",
+        "tokenizer": "gpt5",
+        "inputLimit": 196000,
+        "pricing": {
+            "input": 1.75,
+            "output": 14
+        },
+        "reasoning": {
+            "effort": "xhigh"
+        }
+    },
+    "gpt-5.2-instant": {
+        "apiModel": "gpt-5.2-chat-latest",
+        "provider": "openai",
+        "tokenizer": "gpt5",
+        "inputLimit": 196000,
+        "pricing": {
+            "input": 1.75,
+            "output": 14
+        },
+        "reasoning": null
+    },
+    "gpt-5.2-pro": {
+        "provider": "openai",
+        "tokenizer": "gpt5pro",
+        "inputLimit": 196000,
+        "pricing": {
+            "input": 21,
+            "output": 168
+        },
+        "pro": true,
+        "reasoning": {
+            "effort": "xhigh"
+        }
+    },
+    "gemini-3-pro": {
+        "provider": "google",
+        "tokenizer": "gpt5pro",
+        "inputLimit": 200000,
+        "pricing": {
+            "input": 2,
+            "output": 12
+        },
+        "reasoning": null,
+        "supportsBackground": false,
+        "supportsSearch": true
+    },
+    "claude-4.5-sonnet": {
+        "apiModel": "claude-sonnet-4-5",
+        "provider": "anthropic",
+        "tokenizer": "anthropic",
+        "inputLimit": 200000,
+        "pricing": {
+            "input": 3,
+            "output": 15
+        },
+        "pro": true,
+        "reasoning": null,
+        "supportsBackground": false,
+        "supportsSearch": false
+    },
+    "claude-4.1-opus": {
+        "apiModel": "claude-opus-4-1",
+        "provider": "anthropic",
+        "tokenizer": "anthropic",
+        "inputLimit": 200000,
+        "pricing": {
+            "input": 15,
+            "output": 75
+        },
+        "pro": true,
+        "reasoning": {
+            "effort": "high"
+        },
+        "supportsBackground": false,
+        "supportsSearch": false
+    },
+    "grok-4.1": {
+        "apiModel": "grok-4-1-fast-reasoning",
+        "provider": "xai",
+        "tokenizer": "gpt5pro",
+        "inputLimit": 2000000,
+        "pricing": {
+            "input": 0.2,
+            "output": 0.5
+        },
+        "reasoning": null,
+        "supportsBackground": false,
+        "supportsSearch": true,
+        "searchToolType": "web_search"
+    }
+}

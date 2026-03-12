@@ -4,7 +4,7 @@ node_modules
 coverage
 npm-debug.log*
 .bun-check/
-dist/
+# dist/ — committed for direct git install (npm install -g github:...)
 build/
 *.tsbuildinfo
 tsconfig.tsbuildinfo

@@ -20,10 +20,11 @@
     "test:pro": "ORACLE_LIVE_TEST=1 vitest run tests/live/openai-live.test.ts",
     "test:smoke": "bash scripts/smoke-test.sh",
     "test:coverage": "vitest run --coverage",
-    "prepare": "npm run build"
+    "prepublishOnly": "npm run build"
   },
   "files": [
     "dist/**/*",
+    "MODELS.md",
     "README.md",
     "LICENSE"
   ],
