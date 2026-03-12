@@ -1173,6 +1173,21 @@ function createGeminiClient(apiKey, modelName = "gemini-3-pro", resolvedModelId)
 // src/oracle/modelResolver.ts
 import { countTokens as countTokensGpt5Pro2 } from "gpt-tokenizer/model/gpt-5-pro";
 import { pricingFromUsdPerMillion } from "tokentally";
+
+// src/oracle/providerResolver.ts
+function resolveProvider(model) {
+  const bare = stripProviderPrefix(model);
+  const config = MODEL_CONFIGS[bare];
+  if (config?.provider) return config.provider;
+  if (bare.startsWith("gemini")) return "google";
+  if (bare.startsWith("claude")) return "anthropic";
+  if (bare.startsWith("grok")) return "xai";
+  if (bare.startsWith("gpt") || bare.startsWith("o1") || bare.startsWith("o3") || bare.startsWith("o4"))
+    return "openai";
+  return "other";
+}
+
+// src/oracle/modelResolver.ts
 var OPENROUTER_DEFAULT_BASE = "https://openrouter.ai/api/v1";
 var OPENROUTER_MODELS_ENDPOINT = "https://openrouter.ai/api/v1/models";
 function isKnownModel(model) {
@@ -1311,6 +1326,7 @@ async function resolveModelConfig(model, options = {}) {
     } catch {
     }
   }
+  const provider = known?.provider ?? resolveProvider(model);
   return {
     ...known ?? {
       model,
@@ -1318,7 +1334,8 @@ async function resolveModelConfig(model, options = {}) {
       inputLimit: 2e5,
       reasoning: null
     },
-    provider: known?.provider ?? "other",
+    provider,
+    searchToolType: known?.searchToolType ?? (provider === "xai" ? "web_search" : "web_search_preview"),
     supportsBackground: known?.supportsBackground ?? true,
     supportsSearch: known?.supportsSearch ?? true,
     pricing: known?.pricing ?? null
@@ -1326,19 +1343,6 @@ async function resolveModelConfig(model, options = {}) {
 }
 function isProModel(model) {
   return isKnownModel(model) && PRO_MODELS.has(model);
-}
-
-// src/oracle/providerResolver.ts
-function resolveProvider(model) {
-  const bare = stripProviderPrefix(model);
-  const config = MODEL_CONFIGS[bare];
-  if (config?.provider) return config.provider;
-  if (bare.startsWith("gemini")) return "google";
-  if (bare.startsWith("claude")) return "anthropic";
-  if (bare.startsWith("grok")) return "xai";
-  if (bare.startsWith("gpt") || bare.startsWith("o1") || bare.startsWith("o3") || bare.startsWith("o4"))
-    return "openai";
-  return "other";
 }
 
 // src/oracle/client.ts
@@ -4218,6 +4222,7 @@ function resolveApiModel(modelValue, opts) {
   }
   if (normalized.includes("/")) return normalized;
   if (normalized in MODEL_CONFIGS) return normalized;
+  if (/\d/.test(normalized)) return normalized;
   if (normalized.includes("grok")) return "grok-4.1";
   if (normalized.includes("claude") && normalized.includes("sonnet")) return "claude-4.5-sonnet";
   if (normalized.includes("claude") && normalized.includes("opus")) return "claude-4.1-opus";

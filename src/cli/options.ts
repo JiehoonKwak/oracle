@@ -211,6 +211,10 @@ export function resolveApiModel(
   // Exact match in known model registry
   if (normalized in MODEL_CONFIGS) return normalized as ModelName;
 
+  // Specific model IDs (contain version/variant info) pass through as-is
+  // Only short bare keywords (e.g. "grok", "gemini") should trigger aliases
+  if (/\d/.test(normalized)) return normalized as ModelName;
+
   // --- Provider-family aliases (shared) ---
   if (normalized.includes("grok")) return "grok-4.1";
   if (normalized.includes("claude") && normalized.includes("sonnet")) return "claude-4.5-sonnet";

@@ -1,7 +1,8 @@
-import type { ModelConfig, ModelName, KnownModelName, TokenizerFn, ProModelName } from './types.js';
+import type { ModelConfig, ModelName, KnownModelName, TokenizerFn, ProModelName, ToolConfig } from './types.js';
 import { MODEL_CONFIGS, PRO_MODELS } from './config.js';
 import { countTokens as countTokensGpt5Pro } from 'gpt-tokenizer/model/gpt-5-pro';
 import { pricingFromUsdPerMillion } from 'tokentally';
+import { resolveProvider } from './providerResolver.js';
 
 const OPENROUTER_DEFAULT_BASE = 'https://openrouter.ai/api/v1';
 const OPENROUTER_MODELS_ENDPOINT = 'https://openrouter.ai/api/v1/models';
@@ -187,6 +188,7 @@ export async function resolveModelConfig(
   }
 
   // Synthesized generic config for custom endpoints or failed catalog fetch.
+  const provider = known?.provider ?? resolveProvider(model);
   return {
     ...(known ?? {
       model,
@@ -194,7 +196,8 @@ export async function resolveModelConfig(
       inputLimit: 200_000,
       reasoning: null,
     }),
-    provider: known?.provider ?? 'other',
+    provider,
+    searchToolType: (known?.searchToolType ?? (provider === 'xai' ? 'web_search' : 'web_search_preview')) as ToolConfig['type'],
     supportsBackground: known?.supportsBackground ?? true,
     supportsSearch: known?.supportsSearch ?? true,
     pricing: known?.pricing ?? null,
