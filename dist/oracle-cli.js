@@ -195,7 +195,10 @@ var models_default = {
     supportsBackground: false,
     supportsSearch: true,
     searchToolType: "web_search",
-    searchTools: ["web_search", "x_search"]
+    searchTools: [
+      "web_search",
+      "x_search"
+    ]
   }
 };
 
@@ -5981,9 +5984,7 @@ async function shouldBlockDuplicatePrompt({
 // bin/oracle-cli.ts
 var VERSION = getCliVersion();
 var CLI_ENTRYPOINT = fileURLToPath3(import.meta.url);
-var LEGACY_FLAG_ALIASES = /* @__PURE__ */ new Map([
-  ["--[no-]background", "--background"]
-]);
+var LEGACY_FLAG_ALIASES = /* @__PURE__ */ new Map([["--[no-]background", "--background"]]);
 var normalizedArgv = process.argv.map((arg, index) => {
   if (index < 2) return arg;
   return LEGACY_FLAG_ALIASES.get(arg) ?? arg;
