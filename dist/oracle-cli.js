@@ -140,6 +140,7 @@ var models_default = {
     }
   },
   "gemini-3-pro": {
+    apiModel: "gemini-3-pro-preview",
     provider: "google",
     tokenizer: "gpt5pro",
     inputLimit: 2e5,
@@ -193,7 +194,8 @@ var models_default = {
     reasoning: null,
     supportsBackground: false,
     supportsSearch: true,
-    searchToolType: "web_search"
+    searchToolType: "web_search",
+    searchTools: ["web_search", "x_search"]
   }
 };
 
@@ -236,7 +238,8 @@ function hydrateModelConfig(modelName, entry) {
     reasoning: entry.reasoning ? { effort: entry.reasoning.effort } : null,
     supportsBackground: entry.supportsBackground,
     supportsSearch: entry.supportsSearch,
-    searchToolType: entry.searchToolType
+    searchToolType: entry.searchToolType,
+    searchTools: entry.searchTools
   };
 }
 function buildRegistry() {
@@ -877,7 +880,7 @@ function buildRequestBody({
   background,
   storeResponse
 }) {
-  const searchToolType = modelConfig.searchToolType ?? "web_search_preview";
+  const tools = modelConfig.searchTools ? modelConfig.searchTools.map((t) => ({ type: t })) : [{ type: modelConfig.searchToolType ?? "web_search_preview" }];
   return {
     model: modelConfig.apiModel ?? modelConfig.model,
     instructions: systemPrompt,
@@ -892,7 +895,7 @@ function buildRequestBody({
         ]
       }
     ],
-    tools: searchEnabled ? [{ type: searchToolType }] : void 0,
+    tools: searchEnabled ? tools : void 0,
     reasoning: modelConfig.reasoning || void 0,
     max_output_tokens: maxOutputTokens,
     background: background ? true : void 0,
@@ -997,15 +1000,8 @@ function stripProviderPrefix(model) {
 }
 
 // src/oracle/gemini.ts
-var GEMINI_MODEL_ID_MAP = {
-  "gemini-3-pro": "gemini-3-pro-preview"
-};
-function resolveGeminiModelId(modelName) {
-  const bare = stripProviderPrefix(modelName);
-  return GEMINI_MODEL_ID_MAP[bare] ?? bare;
-}
 function createGeminiClient(apiKey, modelName = "gemini-3-pro", resolvedModelId) {
-  const modelId = resolvedModelId ?? resolveGeminiModelId(modelName);
+  const modelId = resolvedModelId ?? stripProviderPrefix(modelName);
   const genAI = new GoogleGenAI({ apiKey });
   const adaptBodyToGemini = (body) => {
     const contents = body.input.map((inputItem) => ({
@@ -1176,13 +1172,13 @@ import { pricingFromUsdPerMillion } from "tokentally";
 
 // src/oracle/providerResolver.ts
 function resolveProvider(model) {
-  const bare = stripProviderPrefix(model);
+  const bare = stripProviderPrefix(model).toLowerCase();
   const config = MODEL_CONFIGS[bare];
   if (config?.provider) return config.provider;
-  if (bare.startsWith("gemini")) return "google";
-  if (bare.startsWith("claude")) return "anthropic";
-  if (bare.startsWith("grok")) return "xai";
-  if (bare.startsWith("gpt") || bare.startsWith("o1") || bare.startsWith("o3") || bare.startsWith("o4"))
+  if (bare.includes("gemini")) return "google";
+  if (bare.includes("claude")) return "anthropic";
+  if (bare.includes("grok")) return "xai";
+  if (bare.includes("gpt") || bare.startsWith("o1-") || bare.startsWith("o3-") || bare.startsWith("o4-"))
     return "openai";
   return "other";
 }
@@ -1330,12 +1326,14 @@ async function resolveModelConfig(model, options = {}) {
   return {
     ...known ?? {
       model,
+      apiModel: model,
       tokenizer: countTokensGpt5Pro2,
       inputLimit: 2e5,
       reasoning: null
     },
     provider,
     searchToolType: known?.searchToolType ?? (provider === "xai" ? "web_search" : "web_search_preview"),
+    searchTools: known?.searchTools ?? (provider === "xai" ? ["web_search", "x_search"] : void 0),
     supportsBackground: known?.supportsBackground ?? true,
     supportsSearch: known?.supportsSearch ?? true,
     pricing: known?.pricing ?? null
@@ -1652,16 +1650,6 @@ function startOscProgress(options = {}) {
     disableEnvVar: "ORACLE_NO_OSC_PROGRESS",
     forceEnvVar: "ORACLE_FORCE_OSC_PROGRESS"
   });
-}
-
-// src/oracle/effectiveModelId.ts
-function resolveEffectiveModelId(model) {
-  const bare = stripProviderPrefix(model);
-  if (resolveProvider(model) === "google") {
-    return resolveGeminiModelId(model);
-  }
-  const config = isKnownModel(bare) ? MODEL_CONFIGS[bare] : void 0;
-  return config?.apiModel ?? bare;
 }
 
 // node_modules/markdansi/dist/render.js
@@ -2987,7 +2975,7 @@ async function runOracle(options, deps = {}) {
   const renderPlain = Boolean(options.renderPlain);
   const timeoutSeconds = options.timeoutSeconds === void 0 || options.timeoutSeconds === "auto" ? isLongRunningModel ? DEFAULT_TIMEOUT_PRO_MS / 1e3 : DEFAULT_TIMEOUT_NON_PRO_MS / 1e3 : options.timeoutSeconds;
   const timeoutMs = timeoutSeconds * 1e3;
-  const effectiveModelId = options.effectiveModelId ?? resolveEffectiveModelId(options.model);
+  const effectiveModelId = options.effectiveModelId ?? modelConfig.apiModel ?? modelConfig.model;
   const requestBody = buildRequestBody({
     modelConfig,
     systemPrompt,
@@ -3084,7 +3072,7 @@ async function runOracle(options, deps = {}) {
   const clientInstance = client ?? clientFactory(apiKey, {
     baseUrl: apiEndpoint,
     model: options.model,
-    resolvedModelId: modelProviderForDispatch === "google" ? resolveGeminiModelId(effectiveModelId) : effectiveModelId,
+    resolvedModelId: effectiveModelId,
     httpTimeoutMs: options.httpTimeoutMs
   });
   logVerbose("Dispatching request to API...");
@@ -4164,15 +4152,6 @@ function usesDefaultStatusFilters(cmd) {
   const allSource = cmd.getOptionValueSource?.("all") ?? "default";
   return hoursSource === "default" && limitSource === "default" && allSource === "default";
 }
-function resolvePreviewMode2(value) {
-  if (typeof value === "string" && value.length > 0) {
-    return value;
-  }
-  if (value === true) {
-    return "summary";
-  }
-  return void 0;
-}
 function parseSearchOption(value) {
   const normalized = value.trim().toLowerCase();
   if (["on", "true", "1", "yes"].includes(normalized)) {
@@ -4214,50 +4193,11 @@ function parseDurationOption(value, label) {
   }
   return parsed;
 }
-function resolveApiModel(modelValue, opts) {
-  const inferFromLabel = opts?.inferFromLabel ?? false;
+function resolveApiModel(modelValue) {
   const normalized = normalizeModelOption(modelValue).toLowerCase();
-  if (!normalized) {
-    return inferFromLabel ? DEFAULT_MODEL : "";
-  }
+  if (!normalized) return "";
   if (normalized.includes("/")) return normalized;
   if (normalized in MODEL_CONFIGS) return normalized;
-  if (/\d/.test(normalized)) return normalized;
-  if (normalized.includes("grok")) return "grok-4.1";
-  if (normalized.includes("claude") && normalized.includes("sonnet")) return "claude-4.5-sonnet";
-  if (normalized.includes("claude") && normalized.includes("opus")) return "claude-4.1-opus";
-  if (!inferFromLabel) {
-    if (normalized === "claude" || normalized === "sonnet" || /(^|\b)sonnet(\b|$)/.test(normalized)) {
-      return "claude-4.5-sonnet";
-    }
-    if (normalized === "opus" || normalized === "claude-4.1") return "claude-4.1-opus";
-  }
-  if (normalized.includes("codex")) {
-    if (!inferFromLabel && normalized.includes("max")) {
-      throw new InvalidArgumentError(
-        "gpt-5.1-codex-max is not available yet. OpenAI has not released the API."
-      );
-    }
-    return "gpt-5.1-codex";
-  }
-  if (normalized.includes("gemini")) return "gemini-3-pro";
-  if (inferFromLabel && normalized.includes("classic")) return "gpt-5-pro";
-  const has52 = normalized.includes("5.2") || inferFromLabel && normalized.includes("5_2");
-  const has51 = normalized.includes("5.1") || inferFromLabel && normalized.includes("5_1");
-  if (has52 && normalized.includes("pro")) return "gpt-5.2-pro";
-  if (has52 && normalized.includes("instant")) return "gpt-5.2-instant";
-  if (normalized.includes("5.0") || normalized.includes("5-pro")) return "gpt-5-pro";
-  if (!inferFromLabel && (normalized === "gpt-5-pro" || normalized === "gpt-5")) return "gpt-5-pro";
-  if (normalized.includes("gpt-5") && normalized.includes("pro") && !has51 && !has52) {
-    return "gpt-5-pro";
-  }
-  if (has51 && normalized.includes("pro")) return "gpt-5.1-pro";
-  if (normalized.includes("pro")) return "gpt-5.2-pro";
-  if (inferFromLabel) {
-    if (has51) return "gpt-5.1";
-    if (normalized.includes("instant") || normalized.includes("fast")) return "gpt-5.2-instant";
-    return "gpt-5.2";
-  }
   return normalized;
 }
 
@@ -6345,7 +6285,7 @@ async function runRootCommand(options) {
     options.prompt = (await readFile(resolve(options.promptFile), "utf8")).trim();
     if (!options.prompt) throw new Error(`Prompt file is empty: ${options.promptFile}`);
   }
-  const previewMode = resolvePreviewMode2(options.dryRun || options.preview);
+  const previewMode = resolvePreviewMode(options.dryRun || options.preview);
   const mergedFileInputs = mergePathLikeOptions(
     options.file,
     options.include,
@@ -6412,7 +6352,7 @@ async function runRootCommand(options) {
   const cliModelArg = normalizeModelOption(options.model) || (multiModelProvided ? "" : DEFAULT_MODEL);
   const resolvedModelCandidate = multiModelProvided ? normalizedMultiModels[0] : resolveApiModel(cliModelArg || DEFAULT_MODEL);
   const resolvedModel = normalizedMultiModels[0] ?? resolvedModelCandidate;
-  const effectiveModelId = resolveEffectiveModelId(resolvedModel);
+  const effectiveModelId = MODEL_CONFIGS[resolvedModel]?.apiModel ?? resolvedModel;
   const resolvedBaseUrl = normalizeBaseUrl(options.baseUrl ?? process.env.OPENAI_BASE_URL);
   const { models: _rawModels, ...optionsWithoutModels } = options;
   const resolvedOptions = { ...optionsWithoutModels, model: resolvedModel };

@@ -83,6 +83,7 @@
     }
   },
   "gemini-3-pro": {
+    "apiModel": "gemini-3-pro-preview",
     "provider": "google",
     "tokenizer": "gpt5pro",
     "inputLimit": 200000,
@@ -136,6 +137,10 @@
     "reasoning": null,
     "supportsBackground": false,
     "supportsSearch": true,
-    "searchToolType": "web_search"
+    "searchToolType": "web_search",
+    "searchTools": [
+      "web_search",
+      "x_search"
+    ]
   }
 }

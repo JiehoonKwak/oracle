@@ -11,9 +11,8 @@ import type {
   RunOracleDeps,
   RunOracleOptions,
   RunOracleResult,
-  ModelName,
 } from "./types.js";
-import { DEFAULT_SYSTEM_PROMPT, MODEL_CONFIGS, TOKENIZER_OPTIONS } from "./config.js";
+import { DEFAULT_SYSTEM_PROMPT, TOKENIZER_OPTIONS } from "./config.js";
 import { readFiles } from "./files.js";
 import { buildPrompt, buildRequestBody } from "./request.js";
 import { estimateRequestTokens } from "./tokenEstimate.js";
@@ -32,8 +31,6 @@ import { formatBaseUrlForLog, maskApiKey } from "./logging.js";
 import { startHeartbeat } from "../heartbeat.js";
 import { startOscProgress } from "./oscProgress.js";
 import { createFsAdapter } from "./fsAdapter.js";
-import { resolveGeminiModelId } from "./gemini.js";
-import { resolveEffectiveModelId as resolveEffectiveModelIdShared } from "./effectiveModelId.js";
 import { renderMarkdownAnsi } from "../cli/markdownRenderer.js";
 import { createMarkdownStreamer } from "markdansi";
 import { executeBackgroundResponse } from "./background.js";
@@ -41,7 +38,6 @@ import { formatTokenEstimate, formatTokenValue, resolvePreviewMode } from "./run
 import { estimateUsdCost } from "tokentally";
 import {
   defaultOpenRouterBaseUrl,
-  isKnownModel,
   isOpenRouterBaseUrl,
   isProModel,
   resolveModelConfig,
@@ -224,7 +220,7 @@ export async function runOracle(
       : options.timeoutSeconds;
   const timeoutMs = timeoutSeconds * 1000;
   // Track the concrete model id we dispatch to (especially for Gemini preview aliases)
-  const effectiveModelId = options.effectiveModelId ?? resolveEffectiveModelIdShared(options.model);
+  const effectiveModelId = options.effectiveModelId ?? modelConfig.apiModel ?? modelConfig.model;
   const requestBody = buildRequestBody({
     modelConfig,
     systemPrompt,
@@ -341,10 +337,7 @@ export async function runOracle(
     clientFactory(apiKey, {
       baseUrl: apiEndpoint,
       model: options.model,
-      resolvedModelId:
-        modelProviderForDispatch === "google"
-          ? resolveGeminiModelId(effectiveModelId as ModelName)
-          : effectiveModelId,
+      resolvedModelId: effectiveModelId,
       httpTimeoutMs: options.httpTimeoutMs,
     });
   logVerbose("Dispatching request to API...");

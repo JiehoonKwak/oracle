@@ -16,22 +16,12 @@ import type {
 } from "./types.js";
 import { stripProviderPrefix } from "./modelUtils.js";
 
-/** Gemini-specific model ID overrides. Only entries that differ from the bare name belong here. */
-const GEMINI_MODEL_ID_MAP: Record<string, string> = {
-  "gemini-3-pro": "gemini-3-pro-preview",
-};
-
-export function resolveGeminiModelId(modelName: ModelName): string {
-  const bare = stripProviderPrefix(modelName);
-  return GEMINI_MODEL_ID_MAP[bare] ?? bare;
-}
-
 export function createGeminiClient(
   apiKey: string,
   modelName: ModelName = "gemini-3-pro",
   resolvedModelId?: string,
 ): ClientLike {
-  const modelId = resolvedModelId ?? resolveGeminiModelId(modelName);
+  const modelId = resolvedModelId ?? stripProviderPrefix(modelName);
   const genAI = new GoogleGenAI({ apiKey });
 
   const adaptBodyToGemini = (body: OracleRequestBody) => {

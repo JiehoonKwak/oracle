@@ -26,6 +26,4 @@ export {
 } from "./oracle/errors.js";
 export { createDefaultClientFactory } from "./oracle/client.js";
 export { runOracle, extractTextOutput } from "./oracle/run.js";
-export { resolveGeminiModelId } from "./oracle/gemini.js";
 export { stripProviderPrefix } from "./oracle/modelUtils.js";
-export { resolveEffectiveModelId } from "./oracle/effectiveModelId.js";

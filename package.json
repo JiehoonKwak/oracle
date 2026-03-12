@@ -1,6 +1,6 @@
 {
   "name": "oracle",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Lightweight API-only CLI for multi-model LLM queries",
   "type": "module",
   "main": "dist/oracle-cli.js",

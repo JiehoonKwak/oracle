@@ -28,7 +28,6 @@ import {
   parseIntOption,
   parseSearchOption,
   usesDefaultStatusFilters,
-  resolvePreviewMode,
   normalizeModelOption,
   normalizeBaseUrl,
   resolveApiModel,
@@ -38,6 +37,7 @@ import {
   mergePathLikeOptions,
   dedupePathInputs,
 } from "../src/cli/options.js";
+import { resolvePreviewMode } from "../src/oracle/runUtils.js";
 import { buildMarkdownBundle } from "../src/cli/markdownBundle.js";
 import { shouldDetachSession } from "../src/cli/detach.js";
 import { applyHiddenAliases } from "../src/cli/hiddenAliases.js";
@@ -48,7 +48,6 @@ import { formatIntroLine } from "../src/cli/tagline.js";
 import { warnIfOversizeBundle } from "../src/cli/bundleWarnings.js";
 import { formatRenderedMarkdown } from "../src/cli/renderOutput.js";
 import { resolveRenderFlag, resolveRenderPlain } from "../src/cli/renderFlags.js";
-import { resolveEffectiveModelId } from "../src/oracle/effectiveModelId.js";
 import {
   handleSessionCommand,
   type StatusOptions,
@@ -118,9 +117,7 @@ type ResolvedCliOptions = Omit<CliOptions, "model"> & {
 
 const VERSION = getCliVersion();
 const CLI_ENTRYPOINT = fileURLToPath(import.meta.url);
-const LEGACY_FLAG_ALIASES = new Map<string, string>([
-  ["--[no-]background", "--background"],
-]);
+const LEGACY_FLAG_ALIASES = new Map<string, string>([["--[no-]background", "--background"]]);
 const normalizedArgv = process.argv.map((arg, index) => {
   if (index < 2) return arg;
   return LEGACY_FLAG_ALIASES.get(arg) ?? arg;
@@ -622,7 +619,8 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     ? normalizedMultiModels[0]
     : resolveApiModel(cliModelArg || DEFAULT_MODEL);
   const resolvedModel: ModelName = normalizedMultiModels[0] ?? resolvedModelCandidate;
-  const effectiveModelId = resolveEffectiveModelId(resolvedModel);
+  const effectiveModelId =
+    MODEL_CONFIGS[resolvedModel as keyof typeof MODEL_CONFIGS]?.apiModel ?? resolvedModel;
   const resolvedBaseUrl = normalizeBaseUrl(options.baseUrl ?? process.env.OPENAI_BASE_URL);
   const { models: _rawModels, ...optionsWithoutModels } = options;
   const resolvedOptions: ResolvedCliOptions = { ...optionsWithoutModels, model: resolvedModel };

@@ -47,6 +47,7 @@ interface ModelJsonEntry {
   supportsBackground?: boolean;
   supportsSearch?: boolean;
   searchToolType?: string;
+  searchTools?: string[];
 }
 
 // --- Load user overrides ---
@@ -81,6 +82,7 @@ function hydrateModelConfig(modelName: string, entry: ModelJsonEntry): ModelConf
     supportsBackground: entry.supportsBackground,
     supportsSearch: entry.supportsSearch,
     searchToolType: entry.searchToolType as ToolConfig["type"] | undefined,
+    searchTools: entry.searchTools as ToolConfig["type"][] | undefined,
   };
 }
 

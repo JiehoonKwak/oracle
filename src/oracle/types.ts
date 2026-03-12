@@ -53,6 +53,7 @@ export interface ModelConfig {
   supportsBackground?: boolean;
   supportsSearch?: boolean;
   searchToolType?: ToolConfig["type"];
+  searchTools?: ToolConfig["type"][];
 }
 
 export interface FileContent {
@@ -203,7 +204,7 @@ export interface BuildRequestBodyParams {
 }
 
 export interface ToolConfig {
-  type: "web_search_preview" | "web_search";
+  type: "web_search_preview" | "web_search" | "x_search";
 }
 
 export interface OracleRequestBody {

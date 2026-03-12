@@ -1,11 +1,18 @@
-import type { ModelConfig, ModelName, KnownModelName, TokenizerFn, ProModelName, ToolConfig } from './types.js';
-import { MODEL_CONFIGS, PRO_MODELS } from './config.js';
-import { countTokens as countTokensGpt5Pro } from 'gpt-tokenizer/model/gpt-5-pro';
-import { pricingFromUsdPerMillion } from 'tokentally';
-import { resolveProvider } from './providerResolver.js';
+import type {
+  ModelConfig,
+  ModelName,
+  KnownModelName,
+  TokenizerFn,
+  ProModelName,
+  ToolConfig,
+} from "./types.js";
+import { MODEL_CONFIGS, PRO_MODELS } from "./config.js";
+import { countTokens as countTokensGpt5Pro } from "gpt-tokenizer/model/gpt-5-pro";
+import { pricingFromUsdPerMillion } from "tokentally";
+import { resolveProvider } from "./providerResolver.js";
 
-const OPENROUTER_DEFAULT_BASE = 'https://openrouter.ai/api/v1';
-const OPENROUTER_MODELS_ENDPOINT = 'https://openrouter.ai/api/v1/models';
+const OPENROUTER_DEFAULT_BASE = "https://openrouter.ai/api/v1";
+const OPENROUTER_MODELS_ENDPOINT = "https://openrouter.ai/api/v1/models";
 
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -17,7 +24,7 @@ export function isOpenRouterBaseUrl(baseUrl: string | undefined): boolean {
   if (!baseUrl) return false;
   try {
     const url = new URL(baseUrl);
-    return url.hostname.includes('openrouter.ai');
+    return url.hostname.includes("openrouter.ai");
   } catch {
     return false;
   }
@@ -31,17 +38,17 @@ export function normalizeOpenRouterBaseUrl(baseUrl: string): string {
   try {
     const url = new URL(baseUrl);
     // If user passed the responses endpoint, trim it so the client does not double-append.
-    if (url.pathname.endsWith('/responses')) {
-      url.pathname = url.pathname.replace(/\/responses\/?$/, '');
+    if (url.pathname.endsWith("/responses")) {
+      url.pathname = url.pathname.replace(/\/responses\/?$/, "");
     }
-    return url.toString().replace(/\/+$/, '');
+    return url.toString().replace(/\/+$/, "");
   } catch {
     return baseUrl;
   }
 }
 
 export function safeModelSlug(model: string): string {
-  return model.replace(/[/\\]/g, '__').replace(/[:*?"<>|]/g, '_');
+  return model.replace(/[/\\]/g, "__").replace(/[:*?"<>|]/g, "_");
 }
 
 interface OpenRouterModelInfo {
@@ -78,7 +85,10 @@ function pruneCatalogCache(now: number): void {
   }
 }
 
-async function fetchOpenRouterCatalog(apiKey: string, fetcher: FetchFn): Promise<OpenRouterModelInfo[]> {
+async function fetchOpenRouterCatalog(
+  apiKey: string,
+  fetcher: FetchFn,
+): Promise<OpenRouterModelInfo[]> {
   const now = Date.now();
   const cached = catalogCache.get(apiKey);
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
@@ -100,8 +110,12 @@ async function fetchOpenRouterCatalog(apiKey: string, fetcher: FetchFn): Promise
   return models;
 }
 
-function mapToOpenRouterId(candidate: string, catalog: OpenRouterModelInfo[], providerHint?: string): string {
-  if (candidate.includes('/')) return candidate;
+function mapToOpenRouterId(
+  candidate: string,
+  catalog: OpenRouterModelInfo[],
+  providerHint?: string,
+): string {
+  if (candidate.includes("/")) return candidate;
   const byExact = catalog.find((entry) => entry.id === candidate);
   if (byExact) return byExact.id;
   const bySuffix = catalog.find((entry) => entry.id.endsWith(`/${candidate}`));
@@ -122,7 +136,8 @@ export async function resolveModelConfig(
 ): Promise<ModelConfig> {
   const known = isKnownModel(model) ? (MODEL_CONFIGS[model] as ModelConfig) : null;
   const fetcher: FetchFn = options.fetcher ?? globalThis.fetch.bind(globalThis);
-  const openRouterActive = isOpenRouterBaseUrl(options.baseUrl) || Boolean(options.openRouterApiKey);
+  const openRouterActive =
+    isOpenRouterBaseUrl(options.baseUrl) || Boolean(options.openRouterApiKey);
 
   if (known && !openRouterActive) {
     return known;
@@ -133,7 +148,7 @@ export async function resolveModelConfig(
     try {
       const catalog = await fetchOpenRouterCatalog(options.openRouterApiKey, fetcher);
       const targetId = mapToOpenRouterId(
-        typeof model === 'string' ? model : String(model),
+        typeof model === "string" ? model : String(model),
         catalog,
         known?.provider,
       );
@@ -148,7 +163,7 @@ export async function resolveModelConfig(
           }),
           apiModel: targetId,
           openRouterId: targetId,
-          provider: known?.provider ?? 'other',
+          provider: known?.provider ?? "other",
           inputLimit: info.context_length ?? known?.inputLimit ?? 200_000,
           pricing:
             info.pricing && info.pricing.prompt != null && info.pricing.completion != null
@@ -162,7 +177,7 @@ export async function resolveModelConfig(
                     outputPerToken: pricing.outputUsdPerToken,
                   };
                 })()
-              : known?.pricing ?? null,
+              : (known?.pricing ?? null),
           supportsBackground: known?.supportsBackground ?? true,
           supportsSearch: known?.supportsSearch ?? true,
         };
@@ -177,7 +192,7 @@ export async function resolveModelConfig(
         }),
         apiModel: targetId,
         openRouterId: targetId,
-        provider: known?.provider ?? 'other',
+        provider: known?.provider ?? "other",
         supportsBackground: known?.supportsBackground ?? true,
         supportsSearch: known?.supportsSearch ?? true,
         pricing: known?.pricing ?? null,
@@ -192,12 +207,17 @@ export async function resolveModelConfig(
   return {
     ...(known ?? {
       model,
+      apiModel: model,
       tokenizer: countTokensGpt5Pro as TokenizerFn,
       inputLimit: 200_000,
       reasoning: null,
     }),
     provider,
-    searchToolType: (known?.searchToolType ?? (provider === 'xai' ? 'web_search' : 'web_search_preview')) as ToolConfig['type'],
+    searchToolType: (known?.searchToolType ??
+      (provider === "xai" ? "web_search" : "web_search_preview")) as ToolConfig["type"],
+    searchTools:
+      known?.searchTools ??
+      (provider === "xai" ? (["web_search", "x_search"] as ToolConfig["type"][]) : undefined),
     supportsBackground: known?.supportsBackground ?? true,
     supportsSearch: known?.supportsSearch ?? true,
     pricing: known?.pricing ?? null,

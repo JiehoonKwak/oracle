@@ -83,7 +83,7 @@ describe("runOracle request payload", () => {
         log: () => {},
       },
     );
-    expect(client.lastRequest?.tools).toEqual([{ type: "web_search" }]);
+    expect(client.lastRequest?.tools).toEqual([{ type: "web_search" }, { type: "x_search" }]);
     expect(client.lastRequest?.background).toBeUndefined();
   });
 

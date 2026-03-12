@@ -1,7 +1,6 @@
 import type { RunOracleOptions, ModelName } from "../oracle.js";
-import { DEFAULT_MODEL } from "../oracle.js";
+import { DEFAULT_MODEL, MODEL_CONFIGS } from "../oracle.js";
 import { normalizeModelOption, resolveApiModel } from "./options.js";
-import { resolveEffectiveModelId } from "../oracle/effectiveModelId.js";
 
 export interface ResolveRunOptionsInput {
   prompt: string;
@@ -20,7 +19,6 @@ export function resolveRunOptionsFromConfig({
   files = [],
   model,
   models,
-  env = process.env,
 }: ResolveRunOptionsInput): ResolvedRunOptions {
   const requestedModelList = Array.isArray(models) ? models : [];
   const normalizedRequestedModels = requestedModelList
@@ -38,7 +36,8 @@ export function resolveRunOptionsFromConfig({
   const uniqueMultiModels: ModelName[] = normalizedRequestedModels.length > 0 ? allModels : [];
 
   const chosenModel: ModelName = uniqueMultiModels[0] ?? resolvedModel;
-  const effectiveModelId = resolveEffectiveModelId(chosenModel);
+  const effectiveModelId =
+    MODEL_CONFIGS[chosenModel as keyof typeof MODEL_CONFIGS]?.apiModel ?? chosenModel;
 
   const runOptions: RunOracleOptions = {
     prompt,

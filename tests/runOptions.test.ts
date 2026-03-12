@@ -39,14 +39,24 @@ describe("resolveRunOptionsFromConfig", () => {
     expect(runOptions.model).toBe("gpt-5.1-codex");
   });
 
-  it("normalizes shorthand multi-model entries", () => {
+  it("passes through exact model names in multi-model entries", () => {
     const { runOptions } = resolveRunOptionsFromConfig({
       prompt: basePrompt,
-      models: ["gpt-5.1", "gemini", "sonnet"],
+      models: ["gpt-5.1", "gemini-3-pro", "claude-4.5-sonnet"],
     });
 
     expect(runOptions.model).toBe("gpt-5.1");
     expect(runOptions.models).toEqual(["gpt-5.1", "gemini-3-pro", "claude-4.5-sonnet"]);
+  });
+
+  it("passes through unknown model names verbatim", () => {
+    const { runOptions } = resolveRunOptionsFromConfig({
+      prompt: basePrompt,
+      models: ["grok-4.20-multi-agent-beta-0309"],
+    });
+
+    expect(runOptions.model).toBe("grok-4.20-multi-agent-beta-0309");
+    expect(runOptions.models).toEqual(["grok-4.20-multi-agent-beta-0309"]);
   });
 });
 

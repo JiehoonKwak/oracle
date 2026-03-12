@@ -2,8 +2,8 @@ import { InvalidArgumentError, type Command } from "commander";
 import { parseDuration } from "../utils/duration.js";
 import path from "node:path";
 import fg from "fast-glob";
-import type { ModelName, PreviewMode } from "../oracle.js";
-import { DEFAULT_MODEL, MODEL_CONFIGS } from "../oracle.js";
+import type { ModelName } from "../oracle.js";
+import { MODEL_CONFIGS } from "../oracle.js";
 
 export function collectPaths(
   value: string | string[] | undefined,
@@ -130,16 +130,6 @@ export function usesDefaultStatusFilters(cmd: Command): boolean {
   return hoursSource === "default" && limitSource === "default" && allSource === "default";
 }
 
-export function resolvePreviewMode(value: boolean | string | undefined): PreviewMode | undefined {
-  if (typeof value === "string" && value.length > 0) {
-    return value as PreviewMode;
-  }
-  if (value === true) {
-    return "summary";
-  }
-  return undefined;
-}
-
 export function parseSearchOption(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   if (["on", "true", "1", "yes"].includes(normalized)) {
@@ -187,96 +177,19 @@ export function parseDurationOption(value: string | undefined, label: string): n
 }
 
 /**
- * Shared model alias resolution.
- * @param modelValue  - raw CLI input or UI label
- * @param opts.inferFromLabel - when true, uses lenient label matching
- *   (empty → DEFAULT_MODEL, extra aliases like "classic"/"thinking"/"fast",
- *    underscore variants, fallback → gpt-5.2).
- *   When false (default), uses strict CLI matching
- *   (codex-max guard, bare-word keywords, passthrough fallback).
+ * Resolve a CLI model input to a ModelName.
+ * - Empty → empty string (caller should apply DEFAULT_MODEL).
+ * - Slash-prefixed → OpenRouter passthrough.
+ * - Exact match in MODEL_CONFIGS → known model.
+ * - Everything else → passthrough (preserves user-specified model IDs verbatim).
  */
-export function resolveApiModel(
-  modelValue: string,
-  opts?: { inferFromLabel?: boolean },
-): ModelName {
-  const inferFromLabel = opts?.inferFromLabel ?? false;
+export function resolveApiModel(modelValue: string): ModelName {
   const normalized = normalizeModelOption(modelValue).toLowerCase();
-
-  if (!normalized) {
-    return inferFromLabel ? DEFAULT_MODEL : ("" as ModelName);
-  }
-
+  if (!normalized) return "" as ModelName;
   // OpenRouter / prefixed IDs pass through unchanged
   if (normalized.includes("/")) return normalized as ModelName;
   // Exact match in known model registry
   if (normalized in MODEL_CONFIGS) return normalized as ModelName;
-
-  // Specific model IDs (contain version/variant info) pass through as-is
-  // Only short bare keywords (e.g. "grok", "gemini") should trigger aliases
-  if (/\d/.test(normalized)) return normalized as ModelName;
-
-  // --- Provider-family aliases (shared) ---
-  if (normalized.includes("grok")) return "grok-4.1";
-  if (normalized.includes("claude") && normalized.includes("sonnet")) return "claude-4.5-sonnet";
-  if (normalized.includes("claude") && normalized.includes("opus")) return "claude-4.1-opus";
-
-  // CLI-only bare keyword matching
-  if (!inferFromLabel) {
-    if (
-      normalized === "claude" ||
-      normalized === "sonnet" ||
-      /(^|\b)sonnet(\b|$)/.test(normalized)
-    ) {
-      return "claude-4.5-sonnet";
-    }
-    if (normalized === "opus" || normalized === "claude-4.1") return "claude-4.1-opus";
-  }
-
-  // Codex
-  if (normalized.includes("codex")) {
-    if (!inferFromLabel && normalized.includes("max")) {
-      throw new InvalidArgumentError(
-        "gpt-5.1-codex-max is not available yet. OpenAI has not released the API.",
-      );
-    }
-    return "gpt-5.1-codex";
-  }
-
-  if (normalized.includes("gemini")) return "gemini-3-pro";
-
-  // Label-only: "classic" alias
-  if (inferFromLabel && normalized.includes("classic")) return "gpt-5-pro";
-
-  // --- Version-specific matching ---
-  const has52 = normalized.includes("5.2") || (inferFromLabel && normalized.includes("5_2"));
-  const has51 = normalized.includes("5.1") || (inferFromLabel && normalized.includes("5_1"));
-
-  if (has52 && normalized.includes("pro")) return "gpt-5.2-pro";
-
-  if (has52 && normalized.includes("instant")) return "gpt-5.2-instant";
-
-  // 5.0 / 5-pro
-  if (normalized.includes("5.0") || normalized.includes("5-pro")) return "gpt-5-pro";
-  if (!inferFromLabel && (normalized === "gpt-5-pro" || normalized === "gpt-5")) return "gpt-5-pro";
-  if (normalized.includes("gpt-5") && normalized.includes("pro") && !has51 && !has52) {
-    return "gpt-5-pro";
-  }
-
-  if (has51 && normalized.includes("pro")) return "gpt-5.1-pro";
-  if (normalized.includes("pro")) return "gpt-5.2-pro";
-
-  // Label-only: remaining version aliases
-  if (inferFromLabel) {
-    if (has51) return "gpt-5.1";
-    if (normalized.includes("instant") || normalized.includes("fast")) return "gpt-5.2-instant";
-    return "gpt-5.2";
-  }
-
-  // CLI mode: passthrough for custom/OpenRouter model IDs
+  // Passthrough — preserves arbitrary model IDs (e.g. grok-4.20-multi-agent-beta-0309)
   return normalized as ModelName;
-}
-
-/** Lenient label→model resolution. Thin wrapper around resolveApiModel. */
-export function inferModelFromLabel(modelValue: string): ModelName {
-  return resolveApiModel(modelValue, { inferFromLabel: true });
 }
