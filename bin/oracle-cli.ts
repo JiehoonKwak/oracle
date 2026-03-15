@@ -842,10 +842,14 @@ async function runInteractiveSession(
       muteStdout: jsonOutput,
     });
     if (jsonOutput && result) {
+      const hasErrors = result.errors && result.errors.length > 0;
       const json =
-        result.answers.length === 1
+        result.answers.length === 1 && !hasErrors
           ? { model: result.answers[0].model, output: result.answers[0].text }
-          : { responses: result.answers.map((a) => ({ model: a.model, output: a.text })) };
+          : {
+              responses: result.answers.map((a) => ({ model: a.model, output: a.text })),
+              ...(hasErrors ? { errors: result.errors } : {}),
+            };
       process.stdout.write(JSON.stringify(json) + "\n");
     }
     const latest = await sessionStore.readSession(sessionMeta.id);

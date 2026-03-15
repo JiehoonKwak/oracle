@@ -65,6 +65,7 @@ const dim = (text: string): string => (isTty ? kleur.dim(text) : text);
 
 export interface SessionRunResult {
   answers: Array<{ model: string; text: string; usage: UsageSummary }>;
+  errors?: Array<{ model: string; error: string }>;
 }
 
 interface SessionRunParams {
@@ -306,15 +307,28 @@ export async function performSessionRun({
           log(dim(`Saved multi-model JSON output to ${savedPath}`));
         }
       }
-      if (hasFailure) {
+      if (hasFailure && summary.fulfilled.length === 0) {
         throw summary.rejected[0].reason;
       }
+      if (hasFailure) {
+        for (const r of summary.rejected) {
+          const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          log(dim(`${r.model}: failed (${msg})`));
+        }
+      }
+      const failedModels = summary.rejected.length > 0
+        ? summary.rejected.map((r) => ({
+            model: r.model,
+            error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+          }))
+        : undefined;
       return {
         answers: summary.fulfilled.map((entry) => ({
           model: entry.model,
           text: entry.answerText,
           usage: entry.usage,
         })),
+        ...(failedModels ? { errors: failedModels } : {}),
       };
     }
     const singleModelOverride = multiModels.length === 1 ? multiModels[0] : undefined;
